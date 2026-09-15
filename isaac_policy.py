@@ -312,6 +312,12 @@ class IsaacPolicy:
                 continue
             alignment = sum(move[i]*wanted[i] for i in (0,1))
             score = self.danger(trial, obs)*tactic["risk"]+grid.costs.get(str(grid.index(trial)),0.)*.8-alignment*3+distance(move,self.last_move)*.1
+            # Once a valid firing lane is reached ``goal`` is the current
+            # position.  In that state movement has no positive objective;
+            # the small inertia term above must not make the previous command
+            # win forever and carry the player past the target.
+            if not any(abs(v) > 1e-6 for v in wanted):
+                score += .35 * math.hypot(*move)
             if score < best_score:
                 best, best_score = move, score
         self.last_move = best

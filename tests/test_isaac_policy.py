@@ -83,6 +83,22 @@ def test_combat_takes_priority_and_aligned_player_holds_firing_lane():
     assert plan['move']==[0,0]
 
 
+def test_aligned_firing_lane_stops_after_approach():
+    """A prior approach direction must not keep walking while shooting."""
+    obs = observation()
+    obs['player']['pos'] = [120, 220]
+    obs['enemies'] = [{'id': 1, 'pos': [320, 160], 'vel': [0, 0],
+                      'size': 10, 'vulnerable': True}]
+    policy = IsaacPolicy()
+    approach = policy.plan(obs)
+    assert approach['move'][1] < 0
+    obs['frame'] += 16
+    obs['player']['pos'] = [120, 160]
+    hold = policy.plan(obs)
+    assert hold['shoot'] == [1, 0]
+    assert hold['move'] == [0, 0]
+
+
 def test_previous_direction_cannot_leak_into_room_entry_or_idle():
     obs=observation()
     obs['doors']=[{'slot':0,'pos':[40,160],'open':True,'target':2,'type':1}]
