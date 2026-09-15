@@ -74,6 +74,19 @@ def test_clear_room_seeks_pickups_then_unvisited_exit():
     assert plan["mode"]=="door" and plan["move"][0]>0
 
 
+def test_near_bottom_door_moves_into_doorway_not_outside_grid():
+    obs = observation()
+    obs["player"]["pos"] = [320,410]
+    obs["doors"] = [{"slot":3,"pos":[320,440],"open":True,"target":2,"type":1}]
+    policy = IsaacPolicy()
+    policy.plan(dict(obs, doors=[]))
+    obs["frame"] += 16
+    plan = policy.plan(obs)
+    assert plan["mode"] == "door"
+    assert plan["goal"] == [320,440]
+    assert plan["move"][1] > 0
+
+
 def test_combat_takes_priority_and_aligned_player_holds_firing_lane():
     obs=observation()
     obs['player']['pos']=[100,160]

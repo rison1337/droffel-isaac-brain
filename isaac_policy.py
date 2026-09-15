@@ -283,8 +283,10 @@ class IsaacPolicy:
                     count = self.visits[(key[0], key[1], door["target"])]
                     point = route[0]
                     if distance(p, door["pos"])<55:
-                        direction = [(-1,0),(0,-1),(1,0),(0,1)][door["slot"]%4]
-                        point = [door["pos"][i]+direction[i]*35 for i in (0,1)]
+                        # Aim at the doorway center. An outward offset is
+                        # outside the grid; route() snaps it back inside and
+                        # makes the fly walk away from the exit.
+                        point = door["pos"][:]
                     options.append((count*1500+route[1], point, ("door",door["slot"])))
             for idx, ex in enumerate(obs.get("exits", [])):
                 route = grid.route(p, ex["pos"])
