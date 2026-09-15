@@ -229,9 +229,23 @@ class IsaacPolicy:
             safe_distance = tactic["distance"]-60 < distance(p,ep) < tactic["distance"]+75
             fire_shot_from_here = (clearing_fire and aligned and 55 < distance(p,ep) < 300
                                    and grid.ray(p,ep,target_cell))
+            alignment_goal = False
+            if clearing_fire and not aligned:
+                # First move onto the fire's horizontal or vertical line. A
+                # diagonal approach can orbit around rocks forever and never
+                # produce a valid tear direction.
+                align_options = []
+                for point in ([p[0], ep[1]], [ep[0], p[1]]):
+                    if distance(point, ep) > 55 and grid.safe(point):
+                        route = grid.route(p, point)
+                        if route:
+                            align_options.append((route[1], route[0]))
+                if align_options:
+                    goal = min(align_options, key=lambda item:item[0])[1]
+                    alignment_goal = True
             if aligned and (safe_distance or fire_shot_from_here) and grid.ray(p,ep,target_cell) and self.danger(p,obs)<.4 and obs["frame"]>=self.reposition_until:
                 goal = p
-            else:
+            elif not alignment_goal:
                 goal = min(options, key=lambda pair: pair[0])[1] if options else None
             if goal is None or not grid.ray(p, ep, target_cell) or not aligned:
                 # Enemy is behind a rock/wall or outside a firing lane.

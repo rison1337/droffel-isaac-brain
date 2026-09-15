@@ -171,6 +171,15 @@ def test_destructible_fire_is_extinguished_but_not_counted_as_an_enemy():
     assert plan['shoot']==[0,0]
 
 
+def test_fire_target_gets_a_cardinal_alignment_goal_before_shooting():
+    obs=observation()
+    obs['player']['pos']=[280,240]
+    obs['hazards']=[{'id':55,'kind':'fire','type':33,'pos':[320,320],'size':12,'hp':5,'destructible':True}]
+    plan=IsaacPolicy().plan(obs)
+    assert plan['mode']=='clearing_fire' and plan['shoot']==[0,0]
+    assert plan['goal'] in ([280,320],[320,240])
+
+
 def test_live_enemies_take_priority_over_fire():
     obs=observation()
     obs['hazards']=[{'id':55,'kind':'fire','type':33,'pos':[320,160],'size':12,'hp':5,'destructible':True}]
