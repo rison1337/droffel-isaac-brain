@@ -1,4 +1,4 @@
-<!-- Demo video is inserted here during release preparation. -->
+https://github.com/user-attachments/assets/3cf884dc-fb61-4d5e-a84a-ed9496528a85
 
 # Droffel
 
