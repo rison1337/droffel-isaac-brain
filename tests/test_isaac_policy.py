@@ -236,6 +236,15 @@ def test_affordable_shop_item_is_selected_but_unaffordable_one_is_skipped():
     assert IsaacPolicy().plan(obs)['mode']=='pickup'
     obs['player']['coins']=5
     assert IsaacPolicy().plan(obs)['mode']!='pickup'
+
+
+def test_grab_bag_is_selected_in_a_clear_room():
+    obs = observation()
+    obs['pickups'] = [{'id': 9, 'pos': [240,160], 'variant': 69,
+                      'subtype': 0, 'price': 0}]
+    plan = IsaacPolicy().plan(obs)
+    assert plan['mode'] == 'pickup'
+    assert plan['target'] is None
     obs['pickups'][0]['price']=-1
     assert IsaacPolicy().plan(obs)['mode']!='pickup'
 

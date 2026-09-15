@@ -268,7 +268,10 @@ class IsaacPolicy:
                 if variant==10:
                     if subtype not in (1,2,5,9) or obs["player"].get("hearts", 0)>=obs["player"].get("max_hearts", 0):
                         continue
-                elif variant not in (20,30,40,100,300):
+                # Standard pickups plus grab bags, pills, trinkets and chest
+                # variants.  These are all collectible entities; hazards and
+                # room decorations are not reported as pickups by the mod.
+                elif variant not in (20,30,40,50,51,52,53,54,55,56,57,58,59,69,70,100,300,350):
                     continue
                 if variant==300 and obs["player"].get("card",0):
                     continue
