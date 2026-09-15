@@ -227,7 +227,9 @@ class IsaacPolicy:
             # when aligned; its fallback even walked towards unreachable foes.
             aligned = min(abs(delta[0]),abs(delta[1])) < max(12.,enemy.get("size",12))
             safe_distance = tactic["distance"]-60 < distance(p,ep) < tactic["distance"]+75
-            if aligned and safe_distance and grid.ray(p,ep,target_cell) and self.danger(p,obs)<.4 and obs["frame"]>=self.reposition_until:
+            fire_shot_from_here = (clearing_fire and aligned and 55 < distance(p,ep) < 300
+                                   and grid.ray(p,ep,target_cell))
+            if aligned and (safe_distance or fire_shot_from_here) and grid.ray(p,ep,target_cell) and self.danger(p,obs)<.4 and obs["frame"]>=self.reposition_until:
                 goal = p
             else:
                 goal = min(options, key=lambda pair: pair[0])[1] if options else None
@@ -359,7 +361,11 @@ class IsaacPolicy:
         if not plan["grid"].hazard_safe(destination) or (plan["mode"]!="door" and not plan["grid"].safe(destination)):
             alternatives = [[movement[0],0.],[0.,movement[1]],[0.,0.]]
             movement = next((v for v in alternatives if plan["grid"].safe([p[i]+v[i]*20 for i in (0,1)])), [0.,0.])
-        shooting = plan["shoot"] if drive("vibration")>.15 else [0.,0.]
+        # The mechanosensory group has a much lower measured rate than the
+        # visual/olfactory groups. Use its calibrated range instead of the
+        # generic 42 Hz drive threshold, otherwise valid shots disappear.
+        vibration_drive = min(1., max(0., (r.get("vibration",0.)-.1)/2.))
+        shooting = plan["shoot"] if vibration_drive>.03 else [0.,0.]
         if plan["mode"] not in ("combat","clearing_fire","clearing_poop"):
             shooting = [0., 0.]
         # In a quiet firing lane, wait for neural permission to fire before

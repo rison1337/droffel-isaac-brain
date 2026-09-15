@@ -1,4 +1,4 @@
-﻿https://github.com/user-attachments/assets/3cf884dc-fb61-4d5e-a84a-ed9496528a85
+https://github.com/user-attachments/assets/3cf884dc-fb61-4d5e-a84a-ed9496528a85
 
 # Droffel
 
@@ -65,4 +65,3 @@ The model uses simplified leaky integrate-and-fire neurons and assumptions about
 The data-free tests cover controller behaviour, local bridge safeguards, Lua input handling, learning isolation and neural-kernel direction. Generated connectomes, recordings, logs, saved experience, local paths and connection tokens are excluded from git.
 
 See [third-party sources and attribution](THIRD_PARTY.md). MaleCNS data is prepared from the [public FlyEM release](https://storage.googleapis.com/flyem-male-cns/index.html); the simulator is derived from [virtual-fly-lab](https://github.com/Leon-Av/virtual-fly-lab). Isaac integration follows the [Repentance Lua API](https://wofsauge.github.io/IsaacDocs/rep/).
-
