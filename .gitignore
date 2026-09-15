@@ -1,6 +1,6 @@
 .venv/
 .tools/
-data/
+/data/
 logs/
 **/.godot/
 terrarium/data/*

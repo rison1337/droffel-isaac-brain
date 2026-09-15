@@ -16,7 +16,7 @@ Droffel connects Isaac's room state to an approximate spiking model built from t
 - Starts another attempt after a game-over while control remains enabled.
 - Offers adaptive tactics or a **no-learning mode** that never reads or writes accumulated experience.
 
-## Quick start В· Windows
+## Quick start · Windows
 
 You need Python 3.11 or newer and a mod-capable installation of Isaac. The current integration is tested with Repentance+; older editions are not verified.
 

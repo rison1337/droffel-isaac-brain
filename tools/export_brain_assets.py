@@ -14,7 +14,7 @@ from neural_groups import make_groups
 
 source = ROOT / "vendor/virtual-fly-lab/data"
 out = ROOT / "terrarium/data"
-out.mkdir(exist_ok=True)
+out.mkdir(parents=True, exist_ok=True)
 with np.load(source / "graph_malecns_v1.npz") as graph:
     ids = graph["ids"]
 ann = pd.read_parquet(source / "annotations_malecns_v1.parquet").set_index("bodyId").reindex(ids)

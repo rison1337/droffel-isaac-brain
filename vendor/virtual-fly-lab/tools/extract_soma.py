@@ -14,7 +14,7 @@ import numpy as np
 import pyarrow.feather as feather
 
 ROOT = Path(__file__).resolve().parents[1]
-DATA_DIR = Path(os.environ.get("FLY_DATA_DIR", r"D:\fly-data"))
+DATA_DIR = Path(os.environ.get("FLY_DATA_DIR", Path(__file__).resolve().parents[3] / "data" / "raw"))
 
 ann = feather.read_table(
     DATA_DIR / "body-annotations-male-cns-v1.0-minconf-0.5.feather",

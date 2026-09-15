@@ -197,6 +197,8 @@ def test_affordable_shop_item_is_selected_but_unaffordable_one_is_skipped():
     assert IsaacPolicy().plan(obs)['mode']=='pickup'
     obs['player']['coins']=5
     assert IsaacPolicy().plan(obs)['mode']!='pickup'
+    obs['pickups'][0]['price']=-1
+    assert IsaacPolicy().plan(obs)['mode']!='pickup'
 
 
 def test_active_item_and_card_are_used_during_combat():
@@ -209,3 +211,18 @@ def test_active_item_and_card_are_used_during_combat():
     obs['player'].update(active_item=0,active_charge=0,card=42)
     plan=IsaacPolicy().plan(obs)
     assert plan['use_card']
+
+
+def test_partial_charge_is_not_used_and_request_survives_report_interval():
+    obs=observation()
+    obs['enemies']=[{'id':1,'type':10,'hp':10,'pos':[320,160],'size':10,'vulnerable':True}]
+    obs['player'].update(active_item=123,active_charge=2,active_max_charge=6)
+    policy=IsaacPolicy()
+    assert not policy.plan(obs)['use_item']
+    obs['player']['active_charge']=6
+    first=policy.plan(obs)
+    obs['frame']+=3
+    held=policy.plan(obs)
+    assert held['use_item'] and held['use_id']==first['use_id']
+    obs['frame']+=10
+    assert not policy.plan(obs)['use_item']

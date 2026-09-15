@@ -24,12 +24,13 @@ def lua():
     return runtime
 
 
-def send_action(lua):
+def send_action(lua, **extra):
     lua.execute('clock=clock+.1; callbacks[2]()')
     observation = next(json.loads(lua.eval('sent['+str(i)+']'))
         for i in range(int(lua.eval('#sent')),0,-1) if lua.eval('sent['+str(i)+']').startswith('{'))
     action = {"kind":"action","token":"test","session":observation["session"],
         "epoch":observation["epoch"],"room":observation["room"],"frame":observation["frame"],"move":[1,0],"shoot":[0,-1]}
+    action.update(extra)
     lua.globals().payload=json.dumps(action)
     lua.execute('received[#received+1]=payload; callbacks[2]()')
     return action
@@ -171,3 +172,28 @@ def test_burning_fire_is_observed_even_when_it_is_not_an_enemy(lua):
     lua.execute('fire.EntityCollisionClass=0; clock=clock+.1; callbacks[2]()')
     snapshot=json.loads(lua.eval('sent[#sent]'))
     assert not snapshot['hazards']
+
+
+def test_only_intact_poop_is_a_destructible_obstacle(lua):
+    lua.execute('''
+        gridType=14; gridCollision=2
+        room.GetGridEntity=function() return {GetType=function() return gridType end} end
+        room.GetGridCollision=function() return gridCollision end
+        clock=clock+.1; callbacks[2]()
+    ''')
+    assert len(json.loads(lua.eval('sent[#sent]'))['poops'])==1
+    for change in ('gridCollision=0', 'gridCollision=4; gridType=15', 'gridType=17'):
+        lua.execute(change+'; clock=clock+.1; callbacks[2]()')
+        assert not json.loads(lua.eval('sent[#sent]'))['poops']
+
+
+@pytest.mark.parametrize('kind,button',[('use_item',9),('use_card',10)])
+def test_consumable_request_is_one_press_despite_repeated_packets(lua,kind,button):
+    lua.execute('ButtonAction.ACTION_ITEM=9; ButtonAction.ACTION_PILLCARD=10')
+    action=send_action(lua,**{kind:True,'use_id':'unique-request'})
+    assert lua.eval(f'callbacks[13](nil,player,2,{button})')==1
+    assert lua.eval(f'callbacks[13](nil,player,1,{button})') is True
+    lua.execute('frameCount=101; callbacks[1]()')
+    lua.globals().payload=json.dumps(action)
+    lua.execute('received[#received+1]=payload; callbacks[2]()')
+    assert lua.eval(f'callbacks[13](nil,player,2,{button})')==0

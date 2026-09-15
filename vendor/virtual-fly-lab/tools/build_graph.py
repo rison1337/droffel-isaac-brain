@@ -4,9 +4,9 @@ The flat export contains fragment-level contacts for every segmentation piece; t
 curated connectome is the subset where both endpoints are bodies with status 'Traced'
 in the annotations (165,122 neurons — the published count).
 
-Input : D:\\fly-data\\connectome-weights-male-cns-v1.0-minconf-0.5.feather
-        D:\\fly-data\\body-neurotransmitters-male-cns-v1.0.feather
-        D:\\fly-data\\body-annotations-male-cns-v1.0-minconf-0.5.feather
+Input : FLY_DATA_DIR/connectome-weights-male-cns-v1.0-minconf-0.5.feather
+        FLY_DATA_DIR/body-neurotransmitters-male-cns-v1.0.feather
+        FLY_DATA_DIR/body-annotations-male-cns-v1.0-minconf-0.5.feather
 Output: data\\graph_malecns_v1.npz            CSR adjacency + ids + neurotransmitter codes
         data\\annotations_malecns_v1.parquet   id -> type/class/superclass/somaSide
 """
@@ -19,7 +19,7 @@ import pandas as pd
 import pyarrow.feather as feather
 import scipy.sparse as sp
 
-DATA_DIR = Path(os.environ.get("FLY_DATA_DIR", r"D:\fly-data"))
+DATA_DIR = Path(os.environ.get("FLY_DATA_DIR", Path(__file__).resolve().parents[3] / "data" / "raw"))
 OUT_DIR = Path(__file__).resolve().parents[1] / "data"
 
 t0 = time.time()

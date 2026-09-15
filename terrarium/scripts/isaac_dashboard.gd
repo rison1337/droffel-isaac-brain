@@ -91,7 +91,7 @@ func _state(state: Dictionary) -> void:
 	brain.update_state(state)
 	var g = state.get("isaac",{})
 	var m = g.get("metrics",{})
-	var mode = {"combat":"combat","clearing_fire":"extinguishing fire","pickup":"pickup","door":"next room","exit":"next floor","entering":"entering","waiting":"waiting","waiting_vulnerable":"waiting for target","stopped":"stopped"}.get(g.get("mode","waiting"),"waiting")
+	var mode = {"combat":"combat","clearing_poop":"breaking obstacles","clearing_fire":"extinguishing fire","pickup":"pickup","door":"next room","exit":"next floor","entering":"entering","waiting":"waiting","waiting_vulnerable":"waiting for target","stopped":"stopped"}.get(g.get("mode","waiting"),"waiting")
 	note.text = ("No learning" if g.get("memory_mode","")=="fixed" else "Learning enabled")+" · F6: enable fly · F7 / Esc: stop"
 	status.text = ("FLY PLAYING · " if g.get("playing",false) else "CONTROL OFF · ")+mode
 	if not g.get("connected",false): status.text = "Open a solo run in Isaac, then press F6."

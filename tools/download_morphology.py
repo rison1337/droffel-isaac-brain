@@ -24,7 +24,8 @@ for cell_type, amount in [("DNp01",2),("LC4",4),("LPLC2",4),("DNa01",2),("DNg07"
     # Deterministic spread in ID order; not a claim of representative biology.
     if len(candidates): selected.extend(candidates[np.linspace(0,len(candidates)-1,min(amount,len(candidates)),dtype=int)])
 meta = json.loads((DATA / "soma_positions_meta.json").read_text())
-CACHE.mkdir(exist_ok=True)
+CACHE.mkdir(parents=True, exist_ok=True)
+OUT.mkdir(parents=True, exist_ok=True)
 
 def fetch(idx):
     body_id = int(ids[idx])
