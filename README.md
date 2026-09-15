@@ -1,6 +1,6 @@
 https://github.com/user-attachments/assets/3cf884dc-fb61-4d5e-a84a-ed9496528a85
 
-# Droffel
+# Droffel Isaac Brain
 
 A virtual fruit-fly nervous system playing **The Binding of Isaac**, with a live 3D view of neural activity.
 
@@ -41,15 +41,7 @@ The dashboard opens a separate 3D brain window. Drag to rotate, use the wheel to
 
 ## How the controller works
 
-```mermaid
-flowchart LR
-    Isaac[Isaac room state] --> Planner[Navigation and target planner]
-    Planner --> Sensory[Artificial sensory encoding]
-    Sensory --> Brain[MaleCNS spiking model]
-    Brain --> Readout[Neural-rate motor readout]
-    Readout --> Isaac
-    Brain --> Viewer[Live 3D brain viewer]
-```
+![Isaac room state passes through planning, sensory encoding, the MaleCNS model and neural-rate readout back to game controls. The model also drives the live 3D brain viewer.](docs/architecture.svg)
 
 This is a **hybrid controller**, not a trained biological fly that understands a video game. Room coordinates come from the mod. Navigation, targeting, item decisions and sensory mappings are engineered. Neural firing rates gate movement and shooting, and recurrent escape-circuit activity alters evasion. Synaptic weights stay fixed; the optional learning layer adapts tactical choices and spatial risk costs. It does not train the whole connectome.
 

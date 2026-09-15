@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="350" viewBox="0 0 1000 350" role="img" aria-labelledby="title desc">
+  <title id="title">Droffel Isaac Brain controller</title>
+  <desc id="desc">Isaac room state flows through navigation, sensory encoding, the MaleCNS model and neural-rate motor readout. Movement and tears feed back into Isaac. Simulated activity is displayed in the live 3D brain viewer.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#9bd9c4"/></marker>
+  </defs>
+  <rect width="1000" height="350" rx="18" fill="#101c20"/>
+  <g fill="none" stroke="#9bd9c4" stroke-width="2" marker-end="url(#arrow)">
+    <path d="M194 90H226"/><path d="M386 90H418"/><path d="M578 90H610"/><path d="M770 90H802"/>
+    <path d="M690 132V190"/>
+    <path d="M882 132V303H114V141"/>
+  </g>
+  <g fill="#192e31" stroke="#527f76" stroke-width="1.5">
+    <rect x="34" y="48" width="160" height="84" rx="12"/>
+    <rect x="226" y="48" width="160" height="84" rx="12"/>
+    <rect x="418" y="48" width="160" height="84" rx="12"/>
+    <rect x="610" y="48" width="160" height="84" rx="12" fill="#21463e" stroke="#9bd9c4"/>
+    <rect x="802" y="48" width="160" height="84" rx="12"/>
+    <rect x="592" y="194" width="196" height="72" rx="12"/>
+  </g>
+  <g fill="#e7f3ef" font-family="Segoe UI, Arial, sans-serif" font-size="18" text-anchor="middle">
+    <text x="114" y="83"><tspan x="114">Isaac</tspan><tspan x="114" dy="25">room state</tspan></text>
+    <text x="306" y="83"><tspan x="306">Navigation &amp;</tspan><tspan x="306" dy="25">target planning</tspan></text>
+    <text x="498" y="83"><tspan x="498">Sensory</tspan><tspan x="498" dy="25">encoding</tspan></text>
+    <text x="690" y="83"><tspan x="690">MaleCNS</tspan><tspan x="690" dy="25">spiking model</tspan></text>
+    <text x="882" y="83"><tspan x="882">Neural-rate</tspan><tspan x="882" dy="25">motor readout</tspan></text>
+    <text x="690" y="224"><tspan x="690">Live 3D</tspan><tspan x="690" dy="24">brain viewer</tspan></text>
+  </g>
+  <g fill="#9bb7b0" font-family="Segoe UI, Arial, sans-serif" font-size="15">
+    <text x="709" y="169">activity</text>
+    <text x="368" y="289">Movement &amp; tears</text>
+  </g>
+</svg>
