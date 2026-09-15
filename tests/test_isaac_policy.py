@@ -76,6 +76,7 @@ def test_clear_room_seeks_pickups_then_unvisited_exit():
 
 def test_combat_takes_priority_and_aligned_player_holds_firing_lane():
     obs=observation()
+    obs['player']['pos']=[100,160]
     obs['enemies']=[{'id':1,'pos':[320,160],'vel':[0,0],'size':10,'vulnerable':True}]
     obs['doors']=[{'slot':0,'pos':[40,160],'open':True,'target':2,'type':1}]
     plan=IsaacPolicy().plan(obs)

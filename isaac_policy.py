@@ -251,6 +251,10 @@ class IsaacPolicy:
                 # Enemy is behind a rock/wall or outside a firing lane.
                 # Hold fire and route around it instead of firing forever.
                 shoot = [0., 0.]
+            elif mode == "combat" and distance(goal, p) > 8:
+                # Reposition first.  A tear fired while crossing to a new
+                # lane inherits the lateral movement and routinely misses.
+                shoot = [0., 0.]
             mode = "clearing_poop" if clearing_poop else ("clearing_fire" if clearing_fire else "combat")
         elif obs.get("clear") and not threats:
             options = []
@@ -390,7 +394,7 @@ class IsaacPolicy:
             shooting = [0., 0.]
         # In a quiet firing lane, wait for neural permission to fire before
         # advancing. Evasion remains available when danger is immediate.
-        if plan["mode"] in ("combat","clearing_fire","clearing_poop") and any(plan["shoot"]) and not any(shooting) and plan["danger"]<1:
+        if plan["mode"] == "combat" and plan.get("goal") is not None and any(plan["shoot"]) and plan["danger"]<1:
             movement = [0.,0.]
         return {"move":[round(v,3) for v in movement], "shoot":shooting,
                 "use_item":bool(plan.get("use_item")), "use_card":bool(plan.get("use_card")),
