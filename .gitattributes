@@ -1,0 +1,6 @@
+* text=auto
+*.cmd text eol=crlf
+*.py text eol=lf
+*.gd text eol=lf
+*.lua text eol=lf
+*.md text eol=lf

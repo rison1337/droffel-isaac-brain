@@ -1,0 +1,2 @@
+# Optional CUDA acceleration for the full neural propagation step.
+cupy-cuda12x>=13,<15

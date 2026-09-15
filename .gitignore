@@ -1,0 +1,14 @@
+.venv/
+.tools/
+data/
+logs/
+**/.godot/
+terrarium/data/*
+!terrarium/data/.gitkeep
+vendor/virtual-fly-lab/data/
+game_paths.json
+isaac_mod/connection.lua
+*.pyc
+__pycache__/
+.pytest_cache/
+0916 (1).mp4
