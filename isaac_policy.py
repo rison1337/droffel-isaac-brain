@@ -123,16 +123,22 @@ class IsaacPolicy:
     def danger(pos, obs):
         risk = 0.
         for e in obs.get("enemies", [])+obs.get("hazards", []):
+            # Destructible fireplaces are objectives, not moving threats. A
+            # separate collision check still keeps the body out of the flame.
+            if e.get("kind") == "fire" and e.get("destructible", False):
+                continue
             predicted = [e["pos"][i]+e.get("vel", [0, 0])[i]*5 for i in (0, 1)]
             gap = distance(pos, predicted)-e.get("size", 12)-12
-            risk += 9*max(0., 1-gap/90)**2
+            risk += 14*max(0., 1-gap/90)**2
         for b in obs.get("bullets", []):
             relative = [b["pos"][i]-pos[i] for i in (0, 1)]
             vel = b.get("vel", [0, 0])
             vv = vel[0]**2+vel[1]**2
             t = max(0., min(12., -sum(relative[i]*vel[i] for i in (0, 1))/max(vv, .001)))
             gap = math.hypot(*(relative[i]+vel[i]*t for i in (0, 1)))-b.get("size", 5)-10
-            risk += 12*max(0., 1-gap/48)**2
+            # Projectiles are the most urgent signal: unlike a stationary
+            # hazard they can cross the room and hit between observations.
+            risk += 30*max(0., 1-gap/48)**2
         return min(100., risk)
 
     def plan(self, obs):
@@ -251,7 +257,7 @@ class IsaacPolicy:
                 # Enemy is behind a rock/wall or outside a firing lane.
                 # Hold fire and route around it instead of firing forever.
                 shoot = [0., 0.]
-            elif mode == "combat" and distance(goal, p) > 8:
+            elif not clearing_fire and not clearing_poop and distance(goal, p) > 8:
                 # Reposition first.  A tear fired while crossing to a new
                 # lane inherits the lateral movement and routinely misses.
                 shoot = [0., 0.]
