@@ -396,6 +396,13 @@ class IsaacPolicy:
         # advancing. Evasion remains available when danger is immediate.
         if plan["mode"] == "combat" and plan.get("goal") is not None and any(plan["shoot"]) and plan["danger"]<1:
             movement = [0.,0.]
+        # Keep a combat tear on its cardinal line.  At high danger, dodge
+        # instead of sending a tear that will be displaced by the dodge.
+        if plan["mode"] == "combat" and plan.get("goal") is not None and any(plan["shoot"]):
+            if plan["danger"] >= 8:
+                shooting = [0., 0.]
+            else:
+                movement = [0., 0.]
         return {"move":[round(v,3) for v in movement], "shoot":shooting,
                 "use_item":bool(plan.get("use_item")), "use_card":bool(plan.get("use_card")),
                 "use_id":plan.get("use_id",""),
