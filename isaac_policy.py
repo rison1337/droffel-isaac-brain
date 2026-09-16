@@ -322,7 +322,13 @@ class IsaacPolicy:
                 # produce a valid tear direction.
                 align_options = []
                 for point in ([p[0], ep[1]], [ep[0], p[1]]):
-                    if distance(point, ep) > 55 and grid.safe(point):
+                    # A missing shot can mean insufficient range or a rock
+                    # in the way, even when already on the correct axis.
+                    # Never select the current position as an alignment
+                    # waypoint: it would override the reachable firing lanes
+                    # below and leave both movement and shooting at zero.
+                    if (distance(point, p) > 2 and distance(point, ep) > 55
+                            and grid.safe(point) and grid.ray(point, ep, target_cell)):
                         route = grid.route(p, point)
                         if route:
                             align_options.append((route[1], route[0]))

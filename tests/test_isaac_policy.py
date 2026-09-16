@@ -1,4 +1,5 @@
 import json
+import pytest
 from isaac_policy import IsaacPolicy, RoomGrid
 from isaac_service import playable
 
@@ -352,6 +353,52 @@ def test_fire_lane_tolerance_allows_shot_when_player_is_a_few_pixels_off_axis():
     plan=IsaacPolicy().plan(obs)
     assert plan['mode']=='clearing_fire'
     assert plan['shoot']==[1,0]
+
+
+@pytest.mark.parametrize('axis', [0, 1])
+@pytest.mark.parametrize('gap', [245.9122, 260., 279.])
+def test_aligned_fire_beyond_tear_range_is_approached_instead_of_waiting(axis, gap):
+    obs = observation()
+    obs['grid_width'] = 17
+    obs['grid'] = [[i,4 if i%17 in (0,16) or i//17 in (0,16) else 0,0]
+                   for i in range(17*17)]
+    obs['player']['pos'] = [240.,240.]
+    obs['player']['pos'][axis] += gap
+    obs['hazards'] = [{'id':55,'kind':'fire','destructible':True,
+                      'pos':[240.,240.],'size':13,'hp':5}]
+    plan = IsaacPolicy(learning=False).plan(obs)
+    assert plan['mode'] == 'clearing_fire'
+    assert plan['shoot'] == [0,0]
+    assert plan['move'][axis] < 0
+    assert plan['goal'] != obs['player']['pos']
+
+
+def test_aligned_fire_behind_a_rock_routes_around_the_blocker():
+    obs = observation()
+    obs['player']['pos'] = [360,240]
+    obs['hazards'] = [{'id':55,'kind':'fire','destructible':True,
+                      'pos':[200,240],'size':13,'hp':5}]
+    obs['grid'][73] = [73,3,2]  # rock at [280,240]
+    plan = IsaacPolicy(learning=False).plan(obs)
+    assert plan['mode'] == 'clearing_fire'
+    assert plan['shoot'] == [0,0] and any(plan['move'])
+    assert plan['goal'] != obs['player']['pos']
+
+
+def test_destroyed_fire_is_replaced_by_pickup_goal_without_old_shot():
+    obs = observation()
+    obs['hazards'] = [{'id':55,'kind':'fire','destructible':True,
+                      'pos':[320,160],'size':13,'hp':5}]
+    obs['pickups'] = [{'id':99,'pos':[240,160],'variant':100,'subtype':395,'price':0}]
+    policy = IsaacPolicy(learning=False)
+    old = policy.plan(obs)
+    assert old['shoot'] == [1,0]
+    obs['hazards'] = []
+    obs['frame'] += 2
+    assert IsaacPolicy.decode(old,{'rates':{'vibration':60}},obs)['shoot'] == [0,0]
+    new = policy.plan(obs)
+    assert new['mode'] == 'pickup' and new['move'][0] > 0
+    assert new['shoot'] == [0,0]
 
 
 def test_live_enemies_take_priority_over_fire():
