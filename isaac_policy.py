@@ -20,6 +20,38 @@ def distance(a, b):
     return math.hypot(a[0]-b[0], a[1]-b[1])
 
 
+def shot_range(obs):
+    """Conservative fallback for older bridges without the player's range."""
+    return max(40., float(obs['player'].get('tear_range', 260.)) - 15.)
+
+
+def aimed_shot(obs, target, grid, target_cell=None):
+    """Only fire a cardinal tear whose predicted path intersects the target."""
+    p = obs['player']['pos']
+    speed = max(1., 10 * obs['player'].get('shot_speed', 1.))
+    reach = shot_range(obs)
+    target_vel = target.get('vel', [0, 0])
+    best, miss = [0., 0.], math.inf
+    for slot, direction in enumerate([[-1, 0], [0, -1], [1, 0], [0, 1]]):
+        inheritance = obs['player'].get('tear_inheritance')
+        drift = inheritance[slot] if inheritance else [v*.5 for v in obs['player'].get('vel', [0, 0])]
+        velocity = [direction[i]*speed + drift[i] for i in (0, 1)]
+        relative = [target['pos'][i]-p[i] for i in (0, 1)]
+        # The short prediction horizon avoids projecting erratic enemies far
+        # through a wall; long shots use the current target position.
+        lead = min(12., distance(p, target['pos']) / speed)
+        aim = [target['pos'][i] + target_vel[i]*lead for i in (0, 1)]
+        delta = [aim[i]-p[i] for i in (0, 1)]
+        length = math.hypot(*velocity)
+        along = sum(delta[i]*velocity[i] for i in (0, 1)) / max(1., length)
+        cross = abs(delta[0]*velocity[1] - delta[1]*velocity[0]) / max(1., length)
+        if (sum(relative[i]*direction[i] for i in (0, 1)) > 0
+                and 0 < along < reach and cross <= max(4., target.get('size', 12))
+                and grid.ray(p, aim, target_cell) and cross < miss):
+            best, miss = direction, cross
+    return best
+
+
 class RoomGrid:
     def __init__(self, obs, clearance=9, costs=None):
         self.origin = obs.get("grid_origin", [0, 0])
@@ -120,25 +152,34 @@ class IsaacPolicy:
         self.use_request = {}
 
     @staticmethod
-    def danger(pos, obs):
+    def danger(pos, obs, velocity=None):
+        """Risk along the next 12 game frames, relative to each moving threat.
+
+        Evaluating a whole segment prevents retreat through an enemy to a
+        deceptively safe endpoint. Terminal separation breaks ties when every
+        candidate starts close to a threat.
+        """
+        velocity = velocity or [0., 0.]
+        radius = obs['player'].get('size', 10)
         risk = 0.
-        for e in obs.get("enemies", [])+obs.get("hazards", []):
-            # Destructible fireplaces are objectives, not moving threats. A
-            # separate collision check still keeps the body out of the flame.
-            if e.get("kind") == "fire" and e.get("destructible", False):
-                continue
-            predicted = [e["pos"][i]+e.get("vel", [0, 0])[i]*5 for i in (0, 1)]
-            gap = distance(pos, predicted)-e.get("size", 12)-12
-            risk += 14*max(0., 1-gap/90)**2
-        for b in obs.get("bullets", []):
-            relative = [b["pos"][i]-pos[i] for i in (0, 1)]
-            vel = b.get("vel", [0, 0])
-            vv = vel[0]**2+vel[1]**2
-            t = max(0., min(12., -sum(relative[i]*vel[i] for i in (0, 1))/max(vv, .001)))
-            gap = math.hypot(*(relative[i]+vel[i]*t for i in (0, 1)))-b.get("size", 5)-10
-            # Projectiles are the most urgent signal: unlike a stationary
-            # hazard they can cross the room and hit between observations.
-            risk += 30*max(0., 1-gap/48)**2
+        groups = [(obs.get('enemies', []), 14., 90.),
+                  (obs.get('hazards', []), 14., 90.),
+                  (obs.get('bullets', []), 30., 32.)]
+        for entities, weight, margin in groups:
+            for e in entities:
+                if e.get('kind') == 'fire' and e.get('destructible', False):
+                    continue
+                # Non-destructible fire still hurts on contact. Destructible
+                # fire is handled as an objective and filtered above.
+                reach = 8. if e.get('kind') == 'fire' else margin
+                rel = [e['pos'][i]-pos[i] for i in (0, 1)]
+                vel = [e.get('vel', [0, 0])[i]-velocity[i] for i in (0, 1)]
+                vv = sum(v*v for v in vel)
+                t = max(0., min(12., -sum(rel[i]*vel[i] for i in (0, 1))/max(vv, .001)))
+                gaps = [math.hypot(*(rel[i]+vel[i]*s for i in (0, 1)))
+                        -e.get('size', 12)-radius for s in (t, 12.)]
+                close, terminal = [max(0., 1-gap/reach)**2 for gap in gaps]
+                risk += weight*(.7*close + .3*terminal)
         return min(100., risk)
 
     def plan(self, obs):
@@ -218,7 +259,7 @@ class IsaacPolicy:
             target_cell = grid.index(ep) if clearing_poop else None
             delta = [ep[i]-p[i] for i in (0, 1)]
             axis = 0 if abs(delta[0]) >= abs(delta[1]) else 1
-            shoot[axis] = 1. if delta[axis]>=0 else -1.
+            shoot = aimed_shot(obs, enemy, grid, target_cell)
             # Find an accessible firing lane at a useful distance from target.
             options = []
             for lane,direction in enumerate([(1,0),(-1,0),(0,1),(0,-1)]):
@@ -253,7 +294,7 @@ class IsaacPolicy:
                 goal = p
             elif not alignment_goal:
                 goal = min(options, key=lambda pair: pair[0])[1] if options else None
-            if goal is None or not grid.ray(p, ep, target_cell) or not aligned:
+            if goal is None or not grid.ray(p, ep, target_cell) or not aligned or not any(shoot):
                 # Enemy is behind a rock/wall or outside a firing lane.
                 # Hold fire and route around it instead of firing forever.
                 shoot = [0., 0.]
@@ -323,7 +364,14 @@ class IsaacPolicy:
             trial = [p[i]+move[i]*24 for i in (0,1)]
             # Exit cells may be outside the ordinary walkable grid.
             leaving = mode=="door" and goal and distance(p,goal)<100 and sum(move[i]*wanted[i] for i in (0,1))>.9
-            if not grid.hazard_safe(trial) or (not leaving and not grid.safe(trial)):
+            traversable = grid.safe(trial)
+            # In a contact emergency the normal clearance buffer can reject
+            # every escape vector in a narrow room. Allow the player's centre
+            # cell, still respecting walls and hazards, before accepting death
+            # by standing still.
+            if not traversable and danger >= 6 and not leaving:
+                traversable = grid.safe(trial, radius=0)
+            if not grid.hazard_safe(trial) or (not leaving and not traversable):
                 continue
             alignment = sum(move[i]*wanted[i] for i in (0,1))
             score = self.danger(trial, obs)*tactic["risk"]+grid.costs.get(str(grid.index(trial)),0.)*.8-alignment*3+distance(move,self.last_move)*.1

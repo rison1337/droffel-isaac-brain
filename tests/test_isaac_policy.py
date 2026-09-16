@@ -60,6 +60,25 @@ def test_bullet_prediction_penalizes_future_collision():
     assert IsaacPolicy.danger([160,160],obs)>IsaacPolicy.danger([160,100],obs)+1
 
 
+def test_projectiles_are_more_urgent_than_a_stationary_fire():
+    obs = observation()
+    obs['hazards'] = [{'kind':'fire','destructible':True,'pos':[200,160],'size':13}]
+    calm = IsaacPolicy.danger([200,160], obs)
+    obs['bullets'] = [{'pos':[240,160],'vel':[-8,0],'size':5}]
+    assert IsaacPolicy.danger([200,160], obs) > calm + 10
+
+
+def test_contact_crowd_gets_an_emergency_escape_vector():
+    obs = observation()
+    obs['player']['pos'] = [320,280]
+    obs['clear'] = False
+    obs['enemies'] = [{'id':i,'type':10,'hp':10,'size':13,
+                       'pos':[320+i*20,280],'vel':[0,0],
+                       'vulnerable':True} for i in (-2,-1,1,2)]
+    plan = IsaacPolicy().plan(obs)
+    assert plan['danger'] > 6 and plan['move'] != [0,0]
+
+
 def test_clear_room_seeks_pickups_then_unvisited_exit():
     obs = observation()
     obs["pickups"]=[{"id":1,"pos":[240,160],"variant":20,"subtype":1,"price":0}]

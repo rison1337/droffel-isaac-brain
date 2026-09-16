@@ -39,6 +39,26 @@ def launch_game_if_needed(game_path):
         subprocess.Popen([str(game_path/"isaac-ng.exe"),"--luadebug"],cwd=game_path)
 
 
+def stop_orphan_service():
+    """Free ports left by a launcher that was interrupted mid-startup.
+
+    This talks only to the fixed local Droffel UI port. Isaac itself is never
+    terminated here, so reopening the launcher cannot kill an existing run.
+    """
+    try:
+        with socket.create_connection(("127.0.0.1", 9886), timeout=.5) as conn:
+            conn.sendall(b'{"cmd":"quit"}\n')
+    except OSError:
+        return
+    deadline = time.monotonic() + 4
+    while time.monotonic() < deadline:
+        try:
+            with socket.create_connection(("127.0.0.1", 29876), timeout=.2):
+                time.sleep(.1)
+        except OSError:
+            return
+
+
 def main():
     LOGS.mkdir(exist_ok=True)
     no_memory="--no-memory" in sys.argv
@@ -54,6 +74,7 @@ def main():
         launch_game_if_needed(game_path)
         return
     game_path = install()
+    stop_orphan_service()
     python = ROOT/".venv/Scripts/python.exe"
     godot = ROOT/".tools/godot/Godot_v4.7.2-stable_win64.exe"
     service = view = None

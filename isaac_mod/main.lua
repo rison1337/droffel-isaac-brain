@@ -88,6 +88,7 @@ local function observe()
         end
     end
     local active_item, active_charge, active_max_charge, card, coins = 0, 0, 1, 0, 0
+    local tear_range, shot_speed, tear_inheritance = 260, 1, nil
     pcall(function() active_item = p:GetActiveItem() or 0 end)
     pcall(function() active_charge = p:GetActiveCharge() or 0 end)
     pcall(function()
@@ -96,13 +97,23 @@ local function observe()
     end)
     pcall(function() card = p:GetCard(0) or 0 end)
     pcall(function() coins = p:GetNumCoins() or 0 end)
+    pcall(function() tear_range = p.TearRange or tear_range end)
+    pcall(function() shot_speed = p.ShotSpeed or shot_speed end)
+    pcall(function()
+        tear_inheritance = {}
+        for _, d in ipairs({Vector(-1,0),Vector(0,-1),Vector(1,0),Vector(0,1)}) do
+            local v = p:GetTearMovementInheritance(d)
+            tear_inheritance[#tear_inheritance+1] = vec(v)
+        end
+    end)
     return {kind="observation", token=config.token, session=session, frame=frame, epoch=stopEpoch,
         armed=armed, paused=game:IsPaused(), dead=p:IsDead(), controls=p:AreControlsEnabled(),
         players=game:GetNumPlayers(), room=level:GetCurrentRoomIndex(), stage=level:GetStage(),
         stage_type=level:GetStageType(), room_type=room:GetType(), clear=room:IsClear(),
         player={pos=vec(p.Position), vel=vec(p.Velocity), size=p.Size, speed=p.MoveSpeed,
             hearts=p:GetHearts(), max_hearts=p:GetMaxHearts(), soul=p:GetSoulHearts(), flying=p.CanFly,
-            coins=coins, active_item=active_item, active_charge=active_charge, active_max_charge=active_max_charge, card=card},
+            coins=coins, active_item=active_item, active_charge=active_charge, active_max_charge=active_max_charge, card=card,
+            tear_range=tear_range, shot_speed=shot_speed, tear_inheritance=tear_inheritance},
         enemies=enemies, bullets=bullets, pickups=pickups, doors=doors, exits=exits, hazards=hazards, poops=poops,
         grid=grid, grid_width=room:GetGridWidth(), grid_origin=vec(room:GetGridPosition(0)),
         bounds={vec(room:GetTopLeftPos()), vec(room:GetBottomRightPos())},
