@@ -87,9 +87,10 @@ class RoomGrid:
 
     def ray(self, a, b, target_cell=None):
         steps = max(1, int(distance(a, b)/12))
+        source_cell = self.index(a)
         for i in range(1, steps):
             idx = self.index([a[0]+(b[0]-a[0])*i/steps, a[1]+(b[1]-a[1])*i/steps])
-            if idx == target_cell:
+            if idx == target_cell or idx == source_cell:
                 continue
             collision, typ = self.cells.get(idx, (4, 0))
             # Floor spikes do not block tears; rocks and walls do.
@@ -262,8 +263,9 @@ class IsaacPolicy:
             shoot = aimed_shot(obs, enemy, grid, target_cell)
             # Find an accessible firing lane at a useful distance from target.
             options = []
+            preferred_distance = min(tactic['distance'], max(60., shot_range(obs)-35.))
             for lane,direction in enumerate([(1,0),(-1,0),(0,1),(0,-1)]):
-                for radius in (tactic["distance"]-50,tactic["distance"],tactic["distance"]+40):
+                for radius in (max(55., preferred_distance-50), preferred_distance, min(shot_range(obs)-5.,preferred_distance+40)):
                     point = [ep[i]+direction[i]*radius for i in (0, 1)]
                     if grid.safe(point) and grid.ray(point, ep, target_cell):
                         route = grid.route(p, point)
@@ -272,10 +274,10 @@ class IsaacPolicy:
                             options.append((route[1]+distance(p, point)*.2+self.danger(point, obs)*tactic["risk"]*9+penalty, route[0]))
             # Keep an already good firing lane. The old code kept moving even
             # when aligned; its fallback even walked towards unreachable foes.
-            aligned = min(abs(delta[0]),abs(delta[1])) < max(12.,enemy.get("size",12))
-            safe_distance = tactic["distance"]-60 < distance(p,ep) < tactic["distance"]+75
+            aligned = min(abs(delta[0]),abs(delta[1])) < max(5.,enemy.get("size",12)*.4)
+            safe_distance = preferred_distance-60 < distance(p,ep) < shot_range(obs)
             fire_shot_from_here = (clearing_fire and aligned and 55 < distance(p,ep) < 300
-                                   and grid.ray(p,ep,target_cell))
+                                   and grid.ray(p,ep,target_cell) and any(shoot))
             alignment_goal = False
             if clearing_fire and not aligned:
                 # First move onto the fire's horizontal or vertical line. A
@@ -290,7 +292,7 @@ class IsaacPolicy:
                 if align_options:
                     goal = min(align_options, key=lambda item:item[0])[1]
                     alignment_goal = True
-            if aligned and (safe_distance or fire_shot_from_here) and grid.ray(p,ep,target_cell) and self.danger(p,obs)<.4 and obs["frame"]>=self.reposition_until:
+            if aligned and (safe_distance or fire_shot_from_here) and any(shoot) and grid.ray(p,ep,target_cell) and self.danger(p,obs)<.4 and obs["frame"]>=self.reposition_until:
                 goal = p
             elif not alignment_goal:
                 goal = min(options, key=lambda pair: pair[0])[1] if options else None
@@ -359,6 +361,8 @@ class IsaacPolicy:
         wanted = unit([goal[i]-p[i] for i in (0,1)]) if goal and distance(p,goal)>8 else [0.,0.]
         danger = self.danger(p, obs)
         choices = [[0.,0.]]+[unit(v) for v in [(1,0),(-1,0),(0,1),(0,-1),(1,1),(1,-1),(-1,1),(-1,-1)]]
+        if not any(wanted) and danger < .4:
+            choices = [[0., 0.]]
         best, best_score = [0.,0.], math.inf
         for move in choices:
             trial = [p[i]+move[i]*24 for i in (0,1)]
@@ -374,7 +378,13 @@ class IsaacPolicy:
             if not grid.hazard_safe(trial) or (not leaving and not traversable):
                 continue
             alignment = sum(move[i]*wanted[i] for i in (0,1))
-            score = self.danger(trial, obs)*tactic["risk"]+grid.costs.get(str(grid.index(trial)),0.)*.8-alignment*3+distance(move,self.last_move)*.1
+            speed = 4. * obs['player'].get('speed', 1.)
+            future = [v*speed for v in move]
+            # Compare moving trajectories, not only the endpoint. Persistent
+            # room costs may break ties but cannot outweigh forward progress.
+            risk = .7*self.danger(p, obs, future)+.3*self.danger(trial, obs)
+            remembered = min(.6, grid.costs.get(str(grid.index(trial)), 0.)*.1)
+            score = risk*tactic['risk']+remembered-alignment*3+distance(move,self.last_move)*.1
             # Once a valid firing lane is reached ``goal`` is the current
             # position.  In that state movement has no positive objective;
             # the small inertia term above must not make the previous command
@@ -384,9 +394,12 @@ class IsaacPolicy:
             if score < best_score:
                 best, best_score = move, score
         self.last_move = best
-        hazards = enemies+obs.get("bullets", [])+obs.get("hazards", [])
-        threat = min(hazards, key=lambda e:distance(p,e["pos"]), default=None)
-        escape = unit([p[i]-threat["pos"][i] for i in (0,1)]) if threat else [0.,0.]
+        # GF escape activity reinforces the evaluated route, including every
+        # projectile/enemy, rather than pushing away from one nearby flame.
+        escape = best[:]
+        if goal and danger < .4 and any(wanted):
+            gain = min(1., max(.25, distance(p, goal)/40.))
+            best = [v*gain for v in best]
         use_item = False
         use_card = False
         if threats and enemy and obs["frame"] >= self.item_cooldown_until:
@@ -405,6 +418,8 @@ class IsaacPolicy:
                 "escape_dir":escape, "danger":danger,
                 "hurt":obs["frame"]<self.hurt_until, "mode":mode, "goal":goal,
                 "room_count":len(self.visits), "grid":grid, "target":enemy["id"] if enemy else None,
+                "target_kind": "poop" if clearing_poop else ("fire" if clearing_fire else "enemy"),
+                "target_entity":enemy,
                 "repositioning":obs["frame"]<self.reposition_until, **request}
 
     @staticmethod
@@ -422,15 +437,18 @@ class IsaacPolicy:
         # Rate thresholds remove spontaneous baseline firing. Zero neural
         # activity means zero movement and shooting (tested by ablation).
         drive = lambda name: max(0.,min(1.,(r.get(name,0.)-2.)/42))
-        x = drive("light_R")-drive("light_L")
-        y = drive("odor_b")-drive("odor_a")
-        movement = [x,y]
+        movement = [0., 0.]
         # Input populations can retain/cross-activate activity after a turn.
         # Neural drive may scale or suppress the requested direction; it must
         # not keep walking through the next room on the previous room's signal.
-        for i in (0,1):
+        for i, (negative, positive) in enumerate([('light_L','light_R'), ('odor_a','odor_b')]):
             wanted = plan["move"][i]
-            movement[i] = math.copysign(min(abs(movement[i]),abs(wanted)),wanted) if movement[i]*wanted>0 else 0.
+            if wanted:
+                requested, opposite = (positive,negative) if wanted>0 else (negative,positive)
+                # Require the requested population to respond. Antagonist
+                # after-discharge reduces gain but cannot cancel a retreat.
+                gain = drive(requested)*(1-.25*drive(opposite))
+                movement[i] = math.copysign(min(gain,abs(wanted)), wanted)
         gf = min(1.,max(0.,(r.get("GF",0.)-5.)/60))*min(1.,plan["danger"]/10)
         if gf>0:
             movement = [(1-.65*gf)*movement[i]+.65*gf*plan["escape_dir"][i] for i in (0,1)]
@@ -441,27 +459,24 @@ class IsaacPolicy:
         # change. This safety projection can veto, never create motor drive.
         p = obs["player"]["pos"]
         destination = [p[i]+movement[i]*20 for i in (0,1)]
-        if not plan["grid"].hazard_safe(destination) or (plan["mode"]!="door" and not plan["grid"].safe(destination)):
+        clearance = 0 if plan['danger'] >= 6 else None
+        if not plan["grid"].hazard_safe(destination) or (plan["mode"]!="door" and not plan["grid"].safe(destination, clearance)):
             alternatives = [[movement[0],0.],[0.,movement[1]],[0.,0.]]
-            movement = next((v for v in alternatives if plan["grid"].safe([p[i]+v[i]*20 for i in (0,1)])), [0.,0.])
-        # The mechanosensory group has a much lower measured rate than the
-        # visual/olfactory groups. Use its calibrated range instead of the
-        # generic 42 Hz drive threshold, otherwise valid shots disappear.
-        vibration_drive = min(1., max(0., (r.get("vibration",0.)-.1)/2.))
-        shooting = plan["shoot"] if vibration_drive>.03 else [0.,0.]
+            movement = next((v for v in alternatives if plan["grid"].safe([p[i]+v[i]*20 for i in (0,1)], clearance)), [0.,0.])
+        shooting = plan["shoot"] if drive('vibration')>.15 else [0.,0.]
         if plan["mode"] not in ("combat","clearing_fire","clearing_poop"):
             shooting = [0., 0.]
-        # In a quiet firing lane, wait for neural permission to fire before
-        # advancing. Evasion remains available when danger is immediate.
-        if plan["mode"] == "combat" and plan.get("goal") is not None and any(plan["shoot"]) and plan["danger"]<1:
-            movement = [0.,0.]
-        # Keep a combat tear on its cardinal line.  At high danger, dodge
-        # instead of sending a tear that will be displaced by the dodge.
-        if plan["mode"] == "combat" and plan.get("goal") is not None and any(plan["shoot"]):
-            if plan["danger"] >= 8:
+        if any(shooting) and 'target_entity' in plan:
+            kind = plan['target_kind']
+            pool = obs.get({'enemy':'enemies','fire':'hazards','poop':'poops'}[kind], [])
+            target_id = -100000-plan['target'] if kind=='poop' else plan['target']
+            target = next((e for e in pool if e['id']==target_id), None)
+            if target is None or not target.get('vulnerable',True) or target.get('hp',1)<=0:
                 shooting = [0., 0.]
             else:
-                movement = [0., 0.]
+                shooting = aimed_shot(obs, target, plan['grid'], int(target_id) if kind=='poop' else None)
+        # Movement has already been chosen for safety. Never zero a retreat
+        # simply because a target happens to be on the firing line.
         return {"move":[round(v,3) for v in movement], "shoot":shooting,
                 "use_item":bool(plan.get("use_item")), "use_card":bool(plan.get("use_card")),
                 "use_id":plan.get("use_id",""),

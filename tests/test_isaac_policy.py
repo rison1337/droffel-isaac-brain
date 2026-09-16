@@ -68,6 +68,19 @@ def test_projectiles_are_more_urgent_than_a_stationary_fire():
     assert IsaacPolicy.danger([200,160], obs) > calm + 10
 
 
+def test_fire_aim_accounts_for_player_drift_before_holding_position():
+    obs = observation()
+    obs['player']['pos'] = [128, 280]
+    obs['player']['vel'] = [3, 0]
+    obs['player']['tear_inheritance'] = [[0,0],[3,0],[3,0],[3,0]]
+    obs['hazards'] = [{'id':55,'kind':'fire','destructible':True,
+                      'pos':[120,360],'size':13,'hp':5}]
+    plan = IsaacPolicy().plan(obs)
+    assert plan['mode'] == 'clearing_fire'
+    assert plan['shoot'] == [0., 0.]
+    assert plan['goal'] != obs['player']['pos']
+
+
 def test_contact_crowd_gets_an_emergency_escape_vector():
     obs = observation()
     obs['player']['pos'] = [320,280]
