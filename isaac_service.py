@@ -71,6 +71,7 @@ class GameBridge:
                                 msg.pop("token", None)
                                 with self.lock:
                                     self.latest, self.received_at, self.connected = msg, time.monotonic(), True
+                                    self.error = ""
                     except socket.timeout:
                         pass
                     while not self.controls.empty():
@@ -199,6 +200,10 @@ def main():
                     "planned_move":plan["move"] if active and plan else [0.,0.],
                     "planned_shoot":plan["shoot"] if active and plan else [0.,0.],
                     "target":plan.get("target") if active and plan else None,
+                    "goal":plan.get("goal") if active and plan else None,
+                    "objective":plan.get("objective") if active and plan else None,
+                    "skipped_targets":plan.get("skipped_targets",[]) if active and plan else [],
+                    "movement_blocked":output.get("movement_blocked",False),
                     "danger":round(plan["danger"],2) if active and plan else 0.,
                     "metrics":dict(metrics),"status":obs.get("status","") if obs else "Start a run in Isaac",
                     "room":obs.get("room",-1) if obs else -1,"stage":obs.get("stage",0) if obs else 0,

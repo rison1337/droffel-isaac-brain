@@ -20,6 +20,9 @@ def distance(a, b):
     return math.hypot(a[0]-b[0], a[1]-b[1])
 
 
+MOVE_LOOKAHEAD = 20.
+
+
 def shot_range(obs):
     """Conservative fallback for older bridges without the player's range."""
     return max(40., float(obs['player'].get('tear_range', 260.)) - 15.)
@@ -85,6 +88,36 @@ class RoomGrid:
         return self.hazard_safe(p) and all(self.walkable(self.index([p[0]+dx, p[1]+dy]))
                    for dx, dy in [(0, 0), (-radius, 0), (radius, 0), (0, -radius), (0, radius)])
 
+    def motion_safe(self, start, end, radius=None, allowed_cells=()):
+        """Check the whole move, including reduced neural motor commands.
+
+        Isaac can leave the player inside our conservative wall-clearance
+        buffer. Permit movement out of that buffer, but never closer to the
+        same obstacle or into a new one. A shorter safe escape must remain
+        valid instead of being rejected because it has not cleared it yet.
+        """
+        radius = self.clearance if radius is None else radius
+        offsets = [(0,0),(-radius,0),(radius,0),(0,-radius),(0,radius)]
+        def blocked(point):
+            indices = {self.index([point[0]+dx,point[1]+dy]) for dx,dy in offsets}
+            return {i for i in indices if i not in allowed_cells and not self.walkable(i)}
+        initial = blocked(start)
+        steps = max(1, math.ceil(distance(start,end)/4))
+        for step in range(1,steps+1):
+            point = [start[i]+(end[i]-start[i])*step/steps for i in (0,1)]
+            touched = blocked(point)
+            if touched-initial:
+                return False
+            if any(distance(point,self.pos(i)) < distance(start,self.pos(i))-1e-6
+                   for i in touched):
+                return False
+            for hazard in self.hazards:
+                gap = distance(point,hazard['pos'])
+                limit = hazard.get('size',12)+self.player_radius+4
+                if gap<=limit and gap<distance(start,hazard['pos'])-1e-6:
+                    return False
+        return True
+
     def ray(self, a, b, target_cell=None):
         steps = max(1, int(distance(a, b)/12))
         source_cell = self.index(a)
@@ -100,14 +133,17 @@ class RoomGrid:
                 return False
         return True
 
-    def route(self, start, goal):
+    def route(self, start, goal, approach=False):
         # Dijkstra over traversable cells; unreachable objects are not targets.
         source, target = self.index(start), self.index(goal)
         candidates = [i for i in self.cells if self.walkable(i)]
         if not candidates:
             return None
         if not self.walkable(target):
+            if not approach:
+                return None
             target = min(candidates, key=lambda i: distance(self.pos(i), goal))
+            goal = self.pos(target)
         frontier, costs, parent = [(0., source)], {source: 0.}, {}
         while frontier:
             cost, current = heapq.heappop(frontier)
@@ -130,6 +166,22 @@ class RoomGrid:
                     costs[nxt], parent[nxt] = new_cost, current
                     heapq.heappush(frontier, (new_cost, nxt))
         return None
+
+
+def firing_routes(grid, start, target, preferred, maximum, minimum=55., target_cell=None):
+    """Reachable positions with an unobstructed cardinal firing lane."""
+    options = []
+    radii = {max(minimum,preferred-50), max(minimum,preferred), min(maximum,preferred+40)}
+    for lane,direction in enumerate([(1,0),(-1,0),(0,1),(0,-1)]):
+        for radius in sorted(radii):
+            if not minimum<=radius<=maximum:
+                continue
+            point = [target[i]+direction[i]*radius for i in (0,1)]
+            if grid.safe(point) and grid.ray(point,target,target_cell):
+                route = grid.route(start,point)
+                if route:
+                    options.append((lane,point,route[0],route[1]))
+    return options
 
 
 class IsaacPolicy:
@@ -222,6 +274,8 @@ class IsaacPolicy:
         clearing_fire = False
         clearing_poop = False
         clearing_tnt = False
+        fire_routes = None
+        skipped_targets = []
         # A poop tile blocks tears.  Select that tile as a temporary target so
         # the fly opens a firing lane instead of staring at the enemy forever.
         if enemy is not None and not grid.ray(p, enemy["pos"]):
@@ -241,7 +295,13 @@ class IsaacPolicy:
             fires = [h for h in obs.get("hazards",[]) if h.get("kind")=="fire"
                      and h.get("destructible",False) and h.get("hp",0)>0
                      and distance(p,h["pos"])<280]
-            enemy = min(fires,key=lambda h:distance(p,h["pos"]),default=None)
+            preferred = min(150., tactic['distance'], max(60.,shot_range(obs)-35.))
+            for fire in sorted(fires,key=lambda h:distance(p,h['pos'])):
+                routes = firing_routes(grid,p,fire['pos'],preferred,min(175.,shot_range(obs)-5.))
+                if routes or any(aimed_shot(obs,fire,grid)):
+                    enemy, fire_routes = fire, routes
+                    break
+                skipped_targets.append(('fire',fire['id']))
             clearing_fire = enemy is not None
         if enemy is None and not enemies and not obs.get("clear") and obs.get("room_type",1)==1:
             plates = [i for i, (_, typ) in grid.cells.items() if typ==20]
@@ -284,27 +344,22 @@ class IsaacPolicy:
         if enemy:
             ep = [enemy["pos"][i]+enemy.get("vel", [0, 0])[i]*4 for i in (0, 1)]
             target_cell = grid.index(ep) if clearing_poop or clearing_tnt else None
-            delta = [ep[i]-p[i] for i in (0, 1)]
-            axis = 0 if abs(delta[0]) >= abs(delta[1]) else 1
             shoot = aimed_shot(obs, enemy, grid, target_cell)
             # Find an accessible firing lane at a useful distance from target.
             options = []
             preferred_distance = min(tactic['distance'], max(60., shot_range(obs)-35.))
             if clearing_fire:
                 preferred_distance = min(150., preferred_distance)
-            for lane,direction in enumerate([(1,0),(-1,0),(0,1),(0,-1)]):
-                max_radius = 175. if clearing_fire else shot_range(obs)-5.
-                min_radius = 150. if clearing_tnt else 55.
-                for radius in (max(min_radius, preferred_distance-50), max(min_radius,preferred_distance), min(max_radius,preferred_distance+40)):
-                    point = [ep[i]+direction[i]*radius for i in (0, 1)]
-                    if (obs['frame'] < self.reposition_until and self.failed_firing_pos is not None
-                            and distance(point, self.failed_firing_pos) < 50):
-                        continue
-                    if grid.safe(point) and grid.ray(point, ep, target_cell):
-                        route = grid.route(p, point)
-                        if route:
-                            penalty = 350 if obs["frame"]<self.reposition_until and lane!=self.firing_lane else 0
-                            options.append((route[1]+distance(p, point)*.2+self.danger(point, obs)*tactic["risk"]*9+penalty, route[0]))
+            routes = fire_routes if clearing_fire else firing_routes(
+                grid,p,ep,preferred_distance,shot_range(obs)-5.,
+                minimum=150. if clearing_tnt else 55.,target_cell=target_cell)
+            for lane,point,waypoint,cost in routes:
+                penalty = 0.
+                if obs['frame']<self.reposition_until:
+                    penalty += 350 if lane!=self.firing_lane else 0
+                    if self.failed_firing_pos is not None and distance(point,self.failed_firing_pos)<50:
+                        penalty += 350
+                options.append((cost+distance(p,point)*.2+self.danger(point,obs)*tactic['risk']*9+penalty,waypoint))
             # Keep an already good firing lane. The old code kept moving even
             # when aligned; its fallback even walked towards unreachable foes.
             # aimed_shot already checks the actual tear trajectory, including
@@ -385,10 +440,12 @@ class IsaacPolicy:
                 route = grid.route(p, pick["pos"])
                 if route:
                     options.append((route[1]-1000+price*8, route[0], ("pickup",pick["id"])))
+                else:
+                    skipped_targets.append(('pickup',pick['id']))
             for door in obs.get("doors", []):
                 if not door["open"] or door.get("type") in (10,13) or door["target"]<0:
                     continue
-                route = grid.route(p, door["pos"])
+                route = grid.route(p, door["pos"], approach=True)
                 if route:
                     count = self.visits[(key[0], key[1], door["target"])]
                     point = route[0]
@@ -419,31 +476,34 @@ class IsaacPolicy:
         arrival_radius = 2. if enemy else 8.
         wanted = unit([goal[i]-p[i] for i in (0,1)]) if goal and distance(p,goal)>arrival_radius else [0.,0.]
         danger = self.danger(p, obs)
+        gain = min(1.,max(.25,distance(p,goal)/40.)) if goal and danger<.4 and any(wanted) else 1.
         choices = [[0.,0.]]+[unit(v) for v in [(1,0),(-1,0),(0,1),(0,-1),(1,1),(1,-1),(-1,1),(-1,-1)]]
         if not any(wanted) and danger < .4:
             choices = [[0., 0.]]
         best, best_score = [0.,0.], math.inf
-        for move in choices:
-            trial = [p[i]+move[i]*24 for i in (0,1)]
+        for direction in choices:
+            move = [v*gain for v in direction]
+            trial = [p[i]+move[i]*MOVE_LOOKAHEAD for i in (0,1)]
             # Exit cells may be outside the ordinary walkable grid.
-            leaving = mode=="door" and goal and distance(p,goal)<100 and sum(move[i]*wanted[i] for i in (0,1))>.9
-            traversable = grid.safe(trial)
+            leaving = mode=="door" and goal and distance(p,goal)<100 and sum(direction[i]*wanted[i] for i in (0,1))>.9
+            door_cells = {grid.index(goal)} if leaving else ()
+            traversable = grid.motion_safe(p,trial,allowed_cells=door_cells)
             # In a contact emergency the normal clearance buffer can reject
             # every escape vector in a narrow room. Allow the player's centre
             # cell, still respecting walls and hazards, before accepting death
             # by standing still.
             if not traversable and danger >= 6 and not leaving:
-                traversable = grid.safe(trial, radius=0)
-            if not grid.hazard_safe(trial) or (not leaving and not traversable):
+                traversable = grid.motion_safe(p,trial,radius=0)
+            if not traversable:
                 continue
-            alignment = sum(move[i]*wanted[i] for i in (0,1))
+            alignment = sum(direction[i]*wanted[i] for i in (0,1))
             speed = 4. * obs['player'].get('speed', 1.)
             future = [v*speed for v in move]
             # Compare moving trajectories, not only the endpoint. Persistent
             # room costs may break ties but cannot outweigh forward progress.
             risk = .7*self.danger(p, obs, future)+.3*self.danger(trial, obs)
             remembered = min(.6, grid.costs.get(str(grid.index(trial)), 0.)*.1)
-            score = risk*tactic['risk']+remembered-alignment*3+distance(move,self.last_move)*.1
+            score = risk*tactic['risk']+remembered-alignment*3+distance(direction,self.last_move)*.1
             # Once a valid firing lane is reached ``goal`` is the current
             # position.  In that state movement has no positive objective;
             # the small inertia term above must not make the previous command
@@ -452,13 +512,10 @@ class IsaacPolicy:
                 score += .35 * math.hypot(*move)
             if score < best_score:
                 best, best_score = move, score
-        self.last_move = best
+        self.last_move = unit(best)
         # GF escape activity reinforces the evaluated route, including every
         # projectile/enemy, rather than pushing away from one nearby flame.
         escape = best[:]
-        if goal and danger < .4 and any(wanted):
-            gain = min(1., max(.25, distance(p, goal)/40.))
-            best = [v*gain for v in best]
         use_item = False
         use_card = False
         if threats and enemy and obs["frame"] >= self.item_cooldown_until:
@@ -497,6 +554,8 @@ class IsaacPolicy:
                 "room_count":len(self.visits), "grid":grid, "target":enemy["id"] if enemy else None,
                 "target_kind": "tnt" if clearing_tnt else ("poop" if clearing_poop else ("fire" if clearing_fire else "enemy")),
                 "target_entity":enemy,
+                "objective":self.target if mode in ('pickup','door','exit') else None,
+                "skipped_targets":skipped_targets,
                 "releasing_attack":releasing,
                 "repositioning":obs["frame"]<self.reposition_until, **request}
 
@@ -536,11 +595,14 @@ class IsaacPolicy:
         # Avoid neural after-discharge walking into a wall after a direction
         # change. This safety projection can veto, never create motor drive.
         p = obs["player"]["pos"]
-        destination = [p[i]+movement[i]*20 for i in (0,1)]
+        destination = [p[i]+movement[i]*MOVE_LOOKAHEAD for i in (0,1)]
         clearance = 0 if plan['danger'] >= 6 else None
-        if not plan["grid"].hazard_safe(destination) or (plan["mode"]!="door" and not plan["grid"].safe(destination, clearance)):
+        door_cells = {plan['grid'].index(plan['goal'])} if plan['mode']=='door' and plan.get('goal') and distance(p,plan['goal'])<100 else ()
+        requested_motion = any(movement)
+        if not plan['grid'].motion_safe(p,destination,clearance,door_cells):
             alternatives = [[movement[0],0.],[0.,movement[1]],[0.,0.]]
-            movement = next((v for v in alternatives if plan["grid"].safe([p[i]+v[i]*20 for i in (0,1)], clearance)), [0.,0.])
+            movement = next((v for v in alternatives if plan['grid'].motion_safe(
+                p,[p[i]+v[i]*MOVE_LOOKAHEAD for i in (0,1)],clearance,door_cells)),[0.,0.])
         shooting = plan["shoot"] if drive('vibration')>.15 else [0.,0.]
         if plan["mode"] not in ("combat","clearing_fire","clearing_poop","clearing_tnt"):
             shooting = [0., 0.]
@@ -563,6 +625,7 @@ class IsaacPolicy:
         # Movement has already been chosen for safety. Never zero a retreat
         # simply because a target happens to be on the firing line.
         return {"move":[round(v,3) for v in movement], "shoot":shooting,
+                "movement_blocked":bool(requested_motion and not any(movement)),
                 "use_item":bool(plan.get("use_item")), "use_card":bool(plan.get("use_card")),
                 "use_id":plan.get("use_id",""),
                 "mode":plan["mode"], "gf_gain":round(gf,3), "danger":round(plan["danger"],2)}

@@ -401,6 +401,105 @@ def test_destroyed_fire_is_replaced_by_pickup_goal_without_old_shot():
     assert new['shoot'] == [0,0]
 
 
+def enclosed_fire_observation():
+    obs = observation()
+    obs['player']['pos'] = [240,160]
+    obs['hazards'] = [{'id':55,'kind':'fire','destructible':True,
+                      'pos':[80,160],'size':13,'hp':5}]
+    grid = RoomGrid(obs)
+    for point in ([40,160],[120,160],[80,120],[80,200]):
+        idx = grid.index(point)
+        obs['grid'][idx] = [idx,3,2]
+    return obs
+
+
+def test_enclosed_fire_does_not_block_reachable_pickup_and_is_reconsidered_after_rocks_break():
+    obs = enclosed_fire_observation()
+    obs['pickups'] = [{'id':9,'variant':20,'subtype':1,'price':0,'pos':[240,240]}]
+    policy = IsaacPolicy(learning=False)
+    plan = policy.plan(obs)
+    assert plan['mode'] == 'pickup' and plan['objective'] == ('pickup',9)
+    assert ('fire',55) in plan['skipped_targets'] and any(plan['move'])
+    # Geometry changes must make the fire eligible again, without a room reset.
+    idx = RoomGrid(obs).index([120,160])
+    obs['grid'][idx] = [idx,0,0]
+    plan = policy.plan(obs)
+    assert plan['mode'] == 'clearing_fire' and plan['shoot'] == [-1,0]
+
+
+def test_unreachable_nearest_fire_does_not_hide_an_accessible_fire():
+    obs = enclosed_fire_observation()
+    obs['hazards'].append({'id':56,'kind':'fire','destructible':True,
+                           'pos':[320,320],'size':13,'hp':5})
+    plan = IsaacPolicy(learning=False).plan(obs)
+    assert plan['target'] == 56 and any(plan['move'])
+
+
+def test_only_unreachable_fire_remaining_does_not_prevent_leaving_room():
+    obs = enclosed_fire_observation()
+    obs['doors'] = [{'slot':2,'pos':[360,160],'open':True,'target':2,'type':1}]
+    policy = IsaacPolicy(learning=False)
+    policy.plan(obs)
+    obs['frame'] += 16
+    plan = policy.plan(obs)
+    assert plan['mode'] == 'door' and plan['move'][0] > 0
+    assert plan['shoot'] == [0,0]
+
+
+@pytest.mark.parametrize('collision,typ', [(3,2),(1,7),(0,8)])
+def test_inaccessible_coin_is_not_replaced_with_a_nearby_walkable_cell(collision,typ):
+    obs = observation()
+    obs['grid'][50] = [50,collision,typ]  # [240,160]
+    obs['pickups'] = [{'id':9,'variant':20,'subtype':1,'price':0,'pos':[240,160]},
+                      {'id':10,'variant':20,'subtype':1,'price':0,'pos':[160,240]}]
+    assert RoomGrid(obs).route([160,160],[240,160]) is None
+    plan = IsaacPolicy(learning=False).plan(obs)
+    assert plan['objective'] == ('pickup',10) and plan['move'][1] > 0
+
+
+def test_flying_can_still_reach_a_pickup_over_a_pit():
+    obs = observation()
+    obs['player']['flying'] = True
+    obs['grid'][50] = [50,1,7]
+    obs['pickups'] = [{'id':9,'variant':20,'subtype':1,'price':0,'pos':[240,160]}]
+    plan = IsaacPolicy(learning=False).plan(obs)
+    assert plan['objective'] == ('pickup',9) and plan['move'][0] > 0
+
+
+def test_partial_escape_from_wall_clearance_is_valid_but_motion_into_rock_is_not():
+    obs = observation()
+    obs['grid'][60] = [60,3,2]  # rock at [200,200]
+    grid = RoomGrid(obs)
+    assert not grid.safe([172,200])
+    assert not grid.safe([172,192])
+    assert grid.motion_safe([172,200],[172,192])
+    assert grid.motion_safe([172,200],[172,176])
+    assert not grid.motion_safe([172,200],[176,200])
+    # Safe endpoints alone must not permit crossing through a whole rock.
+    assert not grid.motion_safe([160,200],[240,200])
+
+
+@pytest.mark.parametrize('start', [[172,200],[176,200],[180,184]])
+def test_pickup_approach_from_wall_buffer_keeps_moving_through_neural_decoder(start):
+    obs = observation()
+    obs['player']['pos'] = start[:]
+    obs['grid'][60] = [60,3,2]
+    obs['pickups'] = [{'id':9,'variant':20,'subtype':1,'price':0,'pos':[240,160]}]
+    policy = IsaacPolicy(learning=False)
+    for _ in range(45):
+        plan = policy.plan(obs)
+        assert plan['mode'] == 'pickup'
+        action = policy.decode(plan,{'rates':{'light_L':60,'light_R':60,'odor_a':60,'odor_b':60}},obs)
+        assert any(action['move']), 'Approach was vetoed even with responding motor populations'
+        # Advance one three-frame controller interval at normal movement speed.
+        obs['player']['pos'] = [obs['player']['pos'][i]+action['move'][i]*12 for i in (0,1)]
+        obs['frame'] += 3
+        if sum((obs['player']['pos'][i]-[240,160][i])**2 for i in (0,1)) < 18**2:
+            break
+    else:
+        pytest.fail('Controller did not reach the coin pickup radius')
+
+
 def test_live_enemies_take_priority_over_fire():
     obs=observation()
     obs['hazards']=[{'id':55,'kind':'fire','type':33,'pos':[320,160],'size':12,'hp':5,'destructible':True}]
