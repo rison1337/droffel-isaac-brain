@@ -287,7 +287,11 @@ class IsaacPolicy:
                             options.append((route[1]+distance(p, point)*.2+self.danger(point, obs)*tactic["risk"]*9+penalty, route[0]))
             # Keep an already good firing lane. The old code kept moving even
             # when aligned; its fallback even walked towards unreachable foes.
-            aligned = min(abs(delta[0]),abs(delta[1])) < max(5.,enemy.get("size",12)*.4)
+            # Isaac's cardinal tears have a finite hitbox and the player can
+            # drift by a few pixels between planner ticks.  Treat a lane as
+            # aligned with a small, size-aware tolerance; a 5 px boundary
+            # made the controller repeatedly stop just short of a fire.
+            aligned = min(abs(delta[0]),abs(delta[1])) < max(10.,enemy.get("size",12)*.75)
             reach = min(180., shot_range(obs)) if clearing_fire else shot_range(obs)
             safe_distance = preferred_distance-60 < distance(p,ep) < reach
             fire_shot_from_here = (clearing_fire and aligned and 55 < distance(p,ep) < reach

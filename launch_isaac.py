@@ -8,6 +8,7 @@ import subprocess
 import sys
 import time
 import traceback
+import re
 
 from tools.install_isaac_mod import install
 
@@ -37,6 +38,38 @@ def launch_game_if_needed(game_path):
         creationflags=subprocess.CREATE_NO_WINDOW).decode(errors="replace")
     if '"isaac-ng.exe"' not in tasks.lower():
         subprocess.Popen([str(game_path/"isaac-ng.exe"),"--luadebug"],cwd=game_path)
+
+
+def disable_focus_pause():
+    """Keep Isaac's simulation running when its window loses focus.
+
+    Repentance+ stores this option in the user's Documents folder rather than
+    beside the executable.  Preserve a one-time backup so the launcher never
+    destroys the original preference.
+    """
+    candidates = [
+        Path(os.environ.get("USERPROFILE", str(Path.home()))) / "Documents" /
+            "My Games" / "Binding of Isaac Repentance+" / "options.ini",
+        Path.home() / "Documents" / "My Games" /
+            "Binding of Isaac Repentance+" / "options.ini",
+    ]
+    for config in candidates:
+        if not config.is_file():
+            continue
+        try:
+            text = config.read_text(encoding="utf-8")
+            updated, count = re.subn(r"(?m)^PauseOnFocusLost=.*$",
+                                     "PauseOnFocusLost=0", text)
+            if not count:
+                updated = text.rstrip("\r\n") + "\r\nPauseOnFocusLost=0\r\n"
+            if updated != text:
+                backup = config.with_name(config.name + ".droffel-backup")
+                if not backup.exists():
+                    backup.write_text(text, encoding="utf-8")
+                config.write_text(updated, encoding="utf-8")
+        except (OSError, UnicodeError):
+            pass
+        return
 
 
 def stop_orphan_service():
@@ -74,6 +107,7 @@ def main():
         launch_game_if_needed(game_path)
         return
     game_path = install()
+    disable_focus_pause()
     stop_orphan_service()
     python = ROOT/".venv/Scripts/python.exe"
     godot = ROOT/".tools/godot/Godot_v4.7.2-stable_win64.exe"

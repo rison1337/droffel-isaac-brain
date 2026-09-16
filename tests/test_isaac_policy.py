@@ -258,6 +258,15 @@ def test_fire_target_gets_a_cardinal_alignment_goal_before_shooting():
     assert plan['goal'] in ([280,320],[320,240])
 
 
+def test_fire_lane_tolerance_allows_shot_when_player_is_a_few_pixels_off_axis():
+    obs=observation()
+    obs['player']['pos']=[206.59,285.39]
+    obs['hazards']=[{'id':55,'kind':'fire','type':33,'pos':[360,280],'size':13,'hp':4,'destructible':True}]
+    plan=IsaacPolicy().plan(obs)
+    assert plan['mode']=='clearing_fire'
+    assert plan['shoot']==[1,0]
+
+
 def test_live_enemies_take_priority_over_fire():
     obs=observation()
     obs['hazards']=[{'id':55,'kind':'fire','type':33,'pos':[320,160],'size':12,'hp':5,'destructible':True}]
