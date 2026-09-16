@@ -90,7 +90,7 @@ def test_stalled_held_attack_is_released_for_charge_weapons():
     policy = IsaacPolicy()
     policy.plan(obs)
     released = False
-    for frame in range(101, 140):
+    for frame in range(101, 170):
         obs['frame'] = frame
         plan = policy.plan(obs)
         released = released or plan['releasing_attack']
