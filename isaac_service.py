@@ -196,6 +196,10 @@ def main():
                 else: bridge.action = None
                 game_state = {"connected":connected,"playing":active,"age":round(min(999.,now-received_at),3),
                     "mode":output["mode"],"move":output["move"],"shoot":output["shoot"],
+                    "planned_move":plan["move"] if active and plan else [0.,0.],
+                    "planned_shoot":plan["shoot"] if active and plan else [0.,0.],
+                    "target":plan.get("target") if active and plan else None,
+                    "danger":round(plan["danger"],2) if active and plan else 0.,
                     "metrics":dict(metrics),"status":obs.get("status","") if obs else "Start a run in Isaac",
                     "room":obs.get("room",-1) if obs else -1,"stage":obs.get("stage",0) if obs else 0,
                     "hearts":obs["player"]["hearts"] if obs else 0,"soul":obs["player"]["soul"] if obs else 0,

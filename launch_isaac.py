@@ -47,7 +47,16 @@ def disable_focus_pause():
     beside the executable.  Preserve a one-time backup so the launcher never
     destroys the original preference.
     """
-    candidates = [
+    candidates = []
+    if os.name == "nt":
+        # Documents can be moved to another drive; USERPROFILE then points
+        # at the wrong options.ini (as on the development machine).
+        import ctypes
+        documents = ctypes.create_unicode_buffer(32768)
+        if ctypes.windll.shell32.SHGetFolderPathW(None, 5, None, 0, documents) == 0:
+            candidates.append(Path(documents.value) / "My Games" /
+                              "Binding of Isaac Repentance+" / "options.ini")
+    candidates += [
         Path(os.environ.get("USERPROFILE", str(Path.home()))) / "Documents" /
             "My Games" / "Binding of Isaac Repentance+" / "options.ini",
         Path.home() / "Documents" / "My Games" /
@@ -104,6 +113,7 @@ def main():
         game_path = Path(json.loads((ROOT/"game_paths.json").read_text())["isaac"]["path"])
         lock.close()
         set_existing_mode(not no_memory)
+        disable_focus_pause()
         launch_game_if_needed(game_path)
         return
     game_path = install()

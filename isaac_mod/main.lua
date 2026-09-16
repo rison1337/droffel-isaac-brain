@@ -7,6 +7,7 @@ local game = Game()
 local config = include("connection")
 local client, connecting, incoming, outgoing = nil, false, "", ""
 local retryAt, lastActionAt, lastSend = 0, -100, -100
+local connectStartedAt = -100
 local armed, inRun, action = false, false, nil
 local session, lastControl, stopEpoch = "", 0, 0
 local frame, inputCalls, tears = 0, 0, 0
@@ -121,7 +122,7 @@ local function observe()
         bounds={vec(room:GetTopLeftPos()), vec(room:GetBottomRightPos())},
         applied=fresh() and action.move or {0,0}, applied_shoot=fresh() and action.shoot or {0,0},
         input_calls=inputCalls, shoot_calls=shootCalls, tears=tears, last_shot_frame=lastShotFrame,
-        mod_version="1.4.0", suspended=suspended, status=status, restarts=restarts,
+        mod_version="1.4.1", suspended=suspended, status=status, restarts=restarts,
         restart_pending=restartPending, restart_seconds=restartPending and math.max(0,restartAt-now()) or 0}
 end
 local function receive(msg)
@@ -157,10 +158,15 @@ local function pump()
         client:setoption("tcp-nodelay",true)
         local connected, err = client:connect("127.0.0.1",config.port)
         connecting = not connected
+        connectStartedAt = t
         if err and err~="timeout" and err~="Operation already in progress" then disconnect(); return end
     end
     if not client then return end
     if connecting then
+        -- On Windows a refused nonblocking connect can remain absent from
+        -- select's writable set. Bound the attempt so a backend restart does
+        -- not leave the mod disconnected forever.
+        if t-connectStartedAt>2 then disconnect(); return end
         local _, writable = socket.select({}, {client}, 0)
         if #writable==0 then return end
         if not client:getpeername() then disconnect(); return end
@@ -295,4 +301,4 @@ mod:AddCallback(ModCallbacks.MC_INPUT_ACTION, function(_, entity, hook, button)
     if hook==InputHook.GET_ACTION_VALUE then return v end
     return v>0.2
 end)
-Isaac.DebugString("Droffel 1.4.0 loaded; socket="..tostring(ok))
+Isaac.DebugString("Droffel 1.4.1 loaded; socket="..tostring(ok))

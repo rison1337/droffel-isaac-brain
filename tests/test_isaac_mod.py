@@ -45,6 +45,30 @@ def test_lua_53_mod_overrides_only_valid_player_movement_and_shooting(lua):
     assert lua.eval('callbacks[13](nil,player,2,8)') is None
 
 
+def test_refused_nonblocking_connection_times_out_and_retries(lua):
+    lua.execute('''
+        local originalReceive = sock.receive
+        sock.receive=function() return nil,"closed","" end
+        callbacks[2]()
+        sock.receive=originalReceive
+        attempts=0
+        local originalConnect=sock.connect
+        sock.connect=function() attempts=attempts+1; return nil,"timeout" end
+        local s=require("socket")
+        local originalSelect=s.select
+        s.select=function() return {},{} end
+        clock=clock+1.1; callbacks[2]()
+        clock=clock+2.1; callbacks[2]()
+        sock.connect=function() attempts=attempts+1; return originalConnect() end
+        s.select=originalSelect
+        clock=clock+1.1; callbacks[2]()
+        trigger=295; callbacks[2]()
+    ''')
+    assert lua.eval('attempts') == 2
+    send_action(lua)
+    assert lua.eval('callbacks[13](nil,player,2,1)') == 1
+
+
 @pytest.mark.parametrize("change",["clock=clock+.4","paused=true","roomIndex=2","frameCount=114; callbacks[1]()",
     "trigger=296; callbacks[2]()","trigger=256; callbacks[2]()","dead=true; callbacks[2]()",
     "numPlayers=2; callbacks[2]()","callbacks[17]()","callbacks[15](nil,false)"])

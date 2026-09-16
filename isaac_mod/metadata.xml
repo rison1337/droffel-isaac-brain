@@ -3,5 +3,5 @@
   <directory>droffel_fly_brain</directory>
   <id>droffel_fly_brain</id>
   <description>Local MaleCNS bridge. F6: fly control. F7: stop. Requires START_ISAAC.cmd.</description>
-  <version>1.4.0</version>
+  <version>1.4.1</version>
 </metadata>

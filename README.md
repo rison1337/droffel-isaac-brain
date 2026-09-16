@@ -12,6 +12,7 @@ Droffel connects Isaac's room state to an approximate spiking model built from t
 - Shows measured cell-body positions for 140,024 neurons and selected real neuron arbors in 3D.
 - Controls movement and tears through a local Isaac mod; no screen scraping or global keyboard injection.
 - Avoids rocks, pits, spikes and fire; breaks poop blocking a firing lane and extinguishes tear-destructible fire.
+- Fires along predicted tear trajectories while retreating and seeks pressure plates in locked, empty normal rooms.
 - Collects free pickups, buys affordable shop items, and can use a charged active item or a held card during combat.
 - Starts another attempt after a game-over while control remains enabled.
 - Offers adaptive tactics or a **no-learning mode** that never reads or writes accumulated experience.
@@ -36,6 +37,8 @@ Edit `game_paths.json` to point to the folder containing `isaac-ng.exe`. Asset p
 | `START_ISAAC_NO_MEMORY.cmd` | Uses fixed tactics; accumulated experience is neither read nor changed. |
 
 Start a run, then press **F6** to enable fly control. **F7** stops it. **Esc** pauses the game and stops control. The launcher installs only Droffel's own mod folder. Restart Isaac through the launcher after updating the mod.
+
+The launcher sets `PauseOnFocusLost=0` in Repentance+'s `options.ini`, preserving a backup when it changes the setting. Restart an already running game once to apply it. This lets the game continue when another window is active; **Esc** still pauses and stops control.
 
 The dashboard opens a separate 3D brain window. Drag to rotate, use the wheel to zoom, and try the stimulus buttons to inspect sensory responses. The original flight-terrain prototype is not part of this release.
 

@@ -154,6 +154,7 @@ class IsaacPolicy:
         self.shot_watch = None
         self.release_until = -1
         self.failed_firing_pos = None
+        self.pressed_plates = set()
 
     @staticmethod
     def danger(pos, obs, velocity=None):
@@ -206,6 +207,7 @@ class IsaacPolicy:
             self.shot_watch = None
             self.release_until = -1
             self.failed_firing_pos = None
+            self.pressed_plates = set()
         hp = obs["player"].get("hearts", 0)+obs["player"].get("soul", 0)
         if self.last_hp is not None and hp < self.last_hp:
             self.hurt_until = obs["frame"]+20
@@ -213,9 +215,13 @@ class IsaacPolicy:
         enemies = obs.get("enemies", [])
         threats = [e for e in enemies if targetable(e)]
         targets = [e for e in threats if e.get("vulnerable", True)]
-        enemy = min(targets, key=lambda e: distance(p, e["pos"]), default=None)
+        # Prefer an enemy we can hit now over a nearer diagonal target. Risk
+        # still considers every enemy, independently of this firing choice.
+        enemy = min(targets, key=lambda e: (not any(aimed_shot(obs, e, grid)),
+                                           distance(p, e["pos"])), default=None)
         clearing_fire = False
         clearing_poop = False
+        clearing_tnt = False
         # A poop tile blocks tears.  Select that tile as a temporary target so
         # the fly opens a firing lane instead of staring at the enemy forever.
         if enemy is not None and not grid.ray(p, enemy["pos"]):
@@ -237,6 +243,19 @@ class IsaacPolicy:
                      and distance(p,h["pos"])<280]
             enemy = min(fires,key=lambda h:distance(p,h["pos"]),default=None)
             clearing_fire = enemy is not None
+        if enemy is None and not enemies and not obs.get("clear") and obs.get("room_type",1)==1:
+            plates = [i for i, (_, typ) in grid.cells.items() if typ==20]
+            # Trap rooms can enclose their button with bomb rocks. An exposed
+            # TNT barrel opens the route; walking at an unreachable plate does
+            # nothing. Only choose this objective when all plates are blocked.
+            if plates and not any(grid.route(p, grid.pos(i)) for i in plates):
+                barrels = [i for i, (collision, typ) in grid.cells.items()
+                           if typ==12 and collision!=0]
+                if barrels:
+                    idx = min(barrels, key=lambda i:distance(p,grid.pos(i)))
+                    enemy = {'id':-200000-idx,'pos':grid.pos(idx),'vel':[0,0],
+                             'size':14,'hp':1,'kind':'tnt','vulnerable':True}
+                    clearing_tnt = True
         # Damage feedback: firing at an unchanged target for four game seconds
         # must provoke a new firing angle, not indefinite stationary shooting.
         if enemy:
@@ -264,7 +283,7 @@ class IsaacPolicy:
         shoot, goal, mode = [0., 0.], None, "waiting"
         if enemy:
             ep = [enemy["pos"][i]+enemy.get("vel", [0, 0])[i]*4 for i in (0, 1)]
-            target_cell = grid.index(ep) if clearing_poop else None
+            target_cell = grid.index(ep) if clearing_poop or clearing_tnt else None
             delta = [ep[i]-p[i] for i in (0, 1)]
             axis = 0 if abs(delta[0]) >= abs(delta[1]) else 1
             shoot = aimed_shot(obs, enemy, grid, target_cell)
@@ -275,7 +294,8 @@ class IsaacPolicy:
                 preferred_distance = min(150., preferred_distance)
             for lane,direction in enumerate([(1,0),(-1,0),(0,1),(0,-1)]):
                 max_radius = 175. if clearing_fire else shot_range(obs)-5.
-                for radius in (max(55., preferred_distance-50), preferred_distance, min(max_radius,preferred_distance+40)):
+                min_radius = 150. if clearing_tnt else 55.
+                for radius in (max(min_radius, preferred_distance-50), max(min_radius,preferred_distance), min(max_radius,preferred_distance+40)):
                     point = [ep[i]+direction[i]*radius for i in (0, 1)]
                     if (obs['frame'] < self.reposition_until and self.failed_firing_pos is not None
                             and distance(point, self.failed_firing_pos) < 50):
@@ -287,11 +307,10 @@ class IsaacPolicy:
                             options.append((route[1]+distance(p, point)*.2+self.danger(point, obs)*tactic["risk"]*9+penalty, route[0]))
             # Keep an already good firing lane. The old code kept moving even
             # when aligned; its fallback even walked towards unreachable foes.
-            # Isaac's cardinal tears have a finite hitbox and the player can
-            # drift by a few pixels between planner ticks.  Treat a lane as
-            # aligned with a small, size-aware tolerance; a 5 px boundary
-            # made the controller repeatedly stop just short of a fire.
-            aligned = min(abs(delta[0]),abs(delta[1])) < max(10.,enemy.get("size",12)*.75)
+            # aimed_shot already checks the actual tear trajectory, including
+            # inherited motion. A separate geometric axis test can veto a
+            # valid moving shot (and deadlock just short of a firing lane).
+            aligned = any(shoot)
             reach = min(180., shot_range(obs)) if clearing_fire else shot_range(obs)
             safe_distance = preferred_distance-60 < distance(p,ep) < reach
             fire_shot_from_here = (clearing_fire and aligned and 55 < distance(p,ep) < reach
@@ -310,19 +329,34 @@ class IsaacPolicy:
                 if align_options:
                     goal = min(align_options, key=lambda item:item[0])[1]
                     alignment_goal = True
-            if aligned and (safe_distance or fire_shot_from_here) and any(shoot) and grid.ray(p,ep,target_cell) and self.danger(p,obs)<.4 and obs["frame"]>=self.reposition_until:
+            # Only HOLD position when safe; firing is independent of moving.
+            if aligned and (safe_distance or fire_shot_from_here) and self.danger(p,obs)<.4 and obs["frame"]>=self.reposition_until:
                 goal = p
             elif not alignment_goal:
                 goal = min(options, key=lambda pair: pair[0])[1] if options else None
-            if goal is None or not grid.ray(p, ep, target_cell) or not aligned or not any(shoot):
-                # Enemy is behind a rock/wall or outside a firing lane.
-                # Hold fire and route around it instead of firing forever.
-                shoot = [0., 0.]
-            elif not clearing_fire and not clearing_poop and distance(goal, p) > 8:
-                # Reposition first.  A tear fired while crossing to a new
-                # lane inherits the lateral movement and routinely misses.
-                shoot = [0., 0.]
-            mode = "clearing_poop" if clearing_poop else ("clearing_fire" if clearing_fire else "combat")
+            # Keep the predicted shot during retreat/repositioning. Range,
+            # obstacles and inherited velocity are checked in aimed_shot and
+            # rechecked against the latest observation by the neural decoder.
+            if clearing_tnt and distance(p,ep)<150:
+                shoot = [0.,0.]
+            mode = "clearing_tnt" if clearing_tnt else ("clearing_poop" if clearing_poop else ("clearing_fire" if clearing_fire else "combat"))
+        elif not obs.get("clear") and not enemies and obs.get("room_type", 1)==1:
+            # Some normal rooms lock every door until a pressure plate is
+            # stepped on. They contain no enemy or pickup to lead us there.
+            plates = []
+            for idx, (_, typ) in grid.cells.items():
+                if typ != 20 or idx in self.pressed_plates:
+                    continue
+                point = grid.pos(idx)
+                if distance(p, point) < 10:
+                    self.pressed_plates.add(idx)
+                    continue
+                route = grid.route(p, point) if grid.safe(point) else None
+                if route:
+                    plates.append((route[1], route[0]))
+            if plates:
+                goal = min(plates, key=lambda item:item[0])[1]
+                mode = "switch"
         elif obs.get("clear") and not threats:
             options = []
             for pick in obs.get("pickups", []):
@@ -376,7 +410,8 @@ class IsaacPolicy:
             mode="waiting_vulnerable"
             # Closed Hosts / burrowing enemies: wait at range, never fire into
             # invulnerability. Nearby hazards still drive evasion below.
-        wanted = unit([goal[i]-p[i] for i in (0,1)]) if goal and distance(p,goal)>8 else [0.,0.]
+        arrival_radius = 2. if enemy else 8.
+        wanted = unit([goal[i]-p[i] for i in (0,1)]) if goal and distance(p,goal)>arrival_radius else [0.,0.]
         danger = self.danger(p, obs)
         choices = [[0.,0.]]+[unit(v) for v in [(1,0),(-1,0),(0,1),(0,-1),(1,1),(1,-1),(-1,1),(-1,-1)]]
         if not any(wanted) and danger < .4:
@@ -454,7 +489,7 @@ class IsaacPolicy:
                 "escape_dir":escape, "danger":danger,
                 "hurt":obs["frame"]<self.hurt_until, "mode":mode, "goal":goal,
                 "room_count":len(self.visits), "grid":grid, "target":enemy["id"] if enemy else None,
-                "target_kind": "poop" if clearing_poop else ("fire" if clearing_fire else "enemy"),
+                "target_kind": "tnt" if clearing_tnt else ("poop" if clearing_poop else ("fire" if clearing_fire else "enemy")),
                 "target_entity":enemy,
                 "releasing_attack":releasing,
                 "repositioning":obs["frame"]<self.reposition_until, **request}
@@ -501,17 +536,24 @@ class IsaacPolicy:
             alternatives = [[movement[0],0.],[0.,movement[1]],[0.,0.]]
             movement = next((v for v in alternatives if plan["grid"].safe([p[i]+v[i]*20 for i in (0,1)], clearance)), [0.,0.])
         shooting = plan["shoot"] if drive('vibration')>.15 else [0.,0.]
-        if plan["mode"] not in ("combat","clearing_fire","clearing_poop"):
+        if plan["mode"] not in ("combat","clearing_fire","clearing_poop","clearing_tnt"):
             shooting = [0., 0.]
         if any(shooting) and 'target_entity' in plan:
             kind = plan['target_kind']
-            pool = obs.get({'enemy':'enemies','fire':'hazards','poop':'poops'}[kind], [])
-            target_id = -100000-plan['target'] if kind=='poop' else plan['target']
+            if kind=='tnt':
+                pool = [{'id':i,'pos':plan['grid'].pos(i),'size':14}
+                        for i,c,t in obs.get('grid',[]) if t==12 and c!=0]
+                target_id = -200000-plan['target']
+            else:
+                pool = obs.get({'enemy':'enemies','fire':'hazards','poop':'poops'}[kind], [])
+                target_id = -100000-plan['target'] if kind=='poop' else plan['target']
             target = next((e for e in pool if e['id']==target_id), None)
             if target is None or not target.get('vulnerable',True) or target.get('hp',1)<=0:
                 shooting = [0., 0.]
             else:
-                shooting = aimed_shot(obs, target, plan['grid'], int(target_id) if kind=='poop' else None)
+                shooting = aimed_shot(obs, target, plan['grid'], int(target_id) if kind in ('poop','tnt') else None)
+                if kind=='tnt' and distance(p,target['pos'])<150:
+                    shooting = [0.,0.]
         # Movement has already been chosen for safety. Never zero a retreat
         # simply because a target happens to be on the firing line.
         return {"move":[round(v,3) for v in movement], "shoot":shooting,

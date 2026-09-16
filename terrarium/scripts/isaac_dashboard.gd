@@ -98,7 +98,7 @@ func _state(state: Dictionary) -> void:
 	elif g.get("restart_pending",false): status.text = "New attempt in %.1f s · F7 to cancel" % float(g.get("restart_seconds",0))
 	elif g.get("dead",false): status.text = "Run over." if not g.get("armed",false) else "Run over. Waiting for a new attempt..."
 	elif g.get("paused",false): status.text = "Transition / pause - control resumes automatically." if g.get("armed",false) else "Game paused. Press F6 to enable the fly."
-	if g.get("connected",false) and g.get("mod_version","") != "1.4.0": status.text = "Update required: restart Isaac through START_ISAAC.cmd."
+	if g.get("connected",false) and g.get("mod_version","") != "1.4.1": status.text = "Update required: restart Isaac through START_ISAAC.cmd."
 	if state.has("observation"):
 		map.observation = state.observation if g.get("connected",false) else {}
 		map.queue_redraw()

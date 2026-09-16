@@ -106,6 +106,55 @@ def test_contact_crowd_gets_an_emergency_escape_vector():
                        'vulnerable':True} for i in (-2,-1,1,2)]
     plan = IsaacPolicy().plan(obs)
     assert plan['danger'] > 6 and plan['move'] != [0,0]
+    assert any(plan['shoot'])
+
+
+def test_retreating_from_chaser_keeps_a_valid_defensive_shot():
+    obs = observation()
+    obs['clear'] = False
+    obs['player']['vel'] = [-2, 0]
+    obs['enemies'] = [{'id':1,'type':10,'hp':10,'size':13,
+                       'pos':[210,160],'vel':[-2,0],'vulnerable':True}]
+    plan = IsaacPolicy(learning=False).plan(obs)
+    assert plan['danger'] > .4
+    assert plan['move'][0] < 0
+    assert plan['shoot'] == [1,0]
+    action = IsaacPolicy.decode(plan, {'rates':{'light_L':60,'vibration':60}}, obs)
+    assert action['move'][0] < 0 and action['shoot'] == [1,0]
+
+
+def test_inherited_tear_motion_can_hit_an_off_axis_target():
+    obs = observation()
+    obs['clear'] = False
+    obs['player']['vel'] = [0,4]
+    obs['player']['tear_inheritance'] = [[0,2],[0,0],[0,2],[0,0]]
+    obs['enemies'] = [{'id':1,'type':10,'hp':10,'size':13,
+                       'pos':[320,192],'vel':[0,0],'vulnerable':True}]
+    plan = IsaacPolicy(learning=False).plan(obs)
+    assert plan['shoot'] == [1,0]
+
+
+def test_fireable_enemy_is_preferred_to_a_nearer_diagonal_enemy():
+    obs = observation()
+    obs['clear'] = False
+    obs['enemies'] = [{'id':i,'type':10,'hp':10,'size':13,'pos':p,
+                      'vel':[0,0],'vulnerable':True}
+                     for i,p in ((1,[220,210]),(2,[330,160]))]
+    plan = IsaacPolicy(learning=False).plan(obs)
+    assert plan['target'] == 2
+    assert plan['shoot'] == [1,0]
+    # The latest observation must still veto a dead/missing target.
+    obs['enemies'].pop()
+    assert IsaacPolicy.decode(plan, {'rates':{'vibration':60}}, obs)['shoot'] == [0,0]
+
+
+def test_small_target_alignment_has_no_idle_gap():
+    obs = observation()
+    obs['player']['pos'] = [160,167]
+    obs['hazards'] = [{'id':55,'kind':'fire','destructible':True,
+                      'pos':[320,160],'size':4,'hp':5}]
+    plan = IsaacPolicy(learning=False).plan(obs)
+    assert any(plan['move']) or any(plan['shoot'])
 
 
 def test_clear_room_seeks_pickups_then_unvisited_exit():
@@ -120,6 +169,44 @@ def test_clear_room_seeks_pickups_then_unvisited_exit():
     policy.visits[(1,0,2)]=2
     plan = policy.plan(obs)
     assert plan["mode"]=="door" and plan["move"][0]>0
+
+
+def test_locked_empty_room_seeks_pressure_plate_once_and_resets_on_new_room():
+    obs = observation()
+    obs['clear'] = False
+    obs['grid'][50] = [50,0,20]  # [240,160]
+    policy = IsaacPolicy(learning=False)
+    plan = policy.plan(obs)
+    assert plan['mode'] == 'switch' and plan['move'][0] > 0
+    obs['player']['pos'] = [240,160]
+    policy.plan(obs)
+    obs['player']['pos'] = [160,160]
+    assert policy.plan(obs)['mode'] == 'waiting'
+    obs['room'] = 2
+    assert policy.plan(obs)['mode'] == 'switch'
+    # Combat always takes precedence over pressing room buttons.
+    obs['enemies'] = [{'id':1,'pos':[320,160],'size':13,'hp':10}]
+    assert policy.plan(obs)['mode'] == 'combat'
+
+
+def test_unreachable_plate_can_be_opened_by_shooting_tnt_at_range():
+    obs = observation()
+    obs['clear'] = False
+    obs['player']['pos'] = [320,320]
+    obs['grid'][48] = [48,0,20]  # enclosed plate at [160,160]
+    for idx in (37,47,49,59):
+        obs['grid'][idx] = [idx,3,2]
+    obs['grid'][90] = [90,2,12]  # exposed TNT at [80,320]
+    plan = IsaacPolicy(learning=False).plan(obs)
+    assert plan['mode'] == 'clearing_tnt' and plan['shoot'] == [-1,0]
+    assert IsaacPolicy.decode(plan,{'rates':{'vibration':60}},obs)['shoot'] == [-1,0]
+    # Never keep firing at the barrel after the latest snapshot says it broke.
+    obs['grid'][90] = [90,0,12]
+    assert IsaacPolicy.decode(plan,{'rates':{'vibration':60}},obs)['shoot'] == [0,0]
+    obs['grid'][90] = [90,2,12]
+    obs['player']['pos'] = [160,320]
+    plan = IsaacPolicy(learning=False).plan(obs)
+    assert plan['shoot'] == [0,0]  # first retreat outside the blast buffer
 
 
 def test_near_bottom_door_moves_into_doorway_not_outside_grid():
