@@ -81,6 +81,22 @@ def test_fire_aim_accounts_for_player_drift_before_holding_position():
     assert plan['goal'] != obs['player']['pos']
 
 
+def test_stalled_held_attack_is_released_for_charge_weapons():
+    obs = observation()
+    obs['enemies'] = [{'id':1,'type':10,'hp':10,'size':10,
+                      'pos':[320,160],'vel':[0,0],'vulnerable':True}]
+    obs['tears'] = 0
+    obs['applied_shoot'] = [1,0]
+    policy = IsaacPolicy()
+    policy.plan(obs)
+    released = False
+    for frame in range(101, 140):
+        obs['frame'] = frame
+        plan = policy.plan(obs)
+        released = released or plan['releasing_attack']
+    assert released
+
+
 def test_contact_crowd_gets_an_emergency_escape_vector():
     obs = observation()
     obs['player']['pos'] = [320,280]

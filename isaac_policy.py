@@ -151,6 +151,9 @@ class IsaacPolicy:
         self.item_cooldown_until = -1
         self.use_until = -1
         self.use_request = {}
+        self.shot_watch = None
+        self.release_until = -1
+        self.failed_firing_pos = None
 
     @staticmethod
     def danger(pos, obs, velocity=None):
@@ -200,6 +203,9 @@ class IsaacPolicy:
             self.stuck_anchor = None
             self.reposition_until = -1
             self.use_until = -1
+            self.shot_watch = None
+            self.release_until = -1
+            self.failed_firing_pos = None
         hp = obs["player"].get("hearts", 0)+obs["player"].get("soul", 0)
         if self.last_hp is not None and hp < self.last_hp:
             self.hurt_until = obs["frame"]+20
@@ -242,6 +248,7 @@ class IsaacPolicy:
                 self.reposition_until=obs["frame"]+60
                 self.firing_lane=(self.firing_lane+1)%4
                 self.target_health[enemy["id"]]=(hp,obs["frame"])
+                self.failed_firing_pos = p[:]
         if obs.get("armed") and not obs.get("paused") and any(abs(v)>.2 for v in obs.get("applied",[0,0])):
             if self.stuck_anchor is None or distance(p,self.stuck_anchor[1])>12:
                 self.stuck_anchor=(obs["frame"],p[:])
@@ -264,9 +271,15 @@ class IsaacPolicy:
             # Find an accessible firing lane at a useful distance from target.
             options = []
             preferred_distance = min(tactic['distance'], max(60., shot_range(obs)-35.))
+            if clearing_fire:
+                preferred_distance = min(150., preferred_distance)
             for lane,direction in enumerate([(1,0),(-1,0),(0,1),(0,-1)]):
-                for radius in (max(55., preferred_distance-50), preferred_distance, min(shot_range(obs)-5.,preferred_distance+40)):
+                max_radius = 175. if clearing_fire else shot_range(obs)-5.
+                for radius in (max(55., preferred_distance-50), preferred_distance, min(max_radius,preferred_distance+40)):
                     point = [ep[i]+direction[i]*radius for i in (0, 1)]
+                    if (obs['frame'] < self.reposition_until and self.failed_firing_pos is not None
+                            and distance(point, self.failed_firing_pos) < 50):
+                        continue
                     if grid.safe(point) and grid.ray(point, ep, target_cell):
                         route = grid.route(p, point)
                         if route:
@@ -275,8 +288,9 @@ class IsaacPolicy:
             # Keep an already good firing lane. The old code kept moving even
             # when aligned; its fallback even walked towards unreachable foes.
             aligned = min(abs(delta[0]),abs(delta[1])) < max(5.,enemy.get("size",12)*.4)
-            safe_distance = preferred_distance-60 < distance(p,ep) < shot_range(obs)
-            fire_shot_from_here = (clearing_fire and aligned and 55 < distance(p,ep) < 300
+            reach = min(180., shot_range(obs)) if clearing_fire else shot_range(obs)
+            safe_distance = preferred_distance-60 < distance(p,ep) < reach
+            fire_shot_from_here = (clearing_fire and aligned and 55 < distance(p,ep) < reach
                                    and grid.ray(p,ep,target_cell) and any(shoot))
             alignment_goal = False
             if clearing_fire and not aligned:
@@ -414,12 +428,31 @@ class IsaacPolicy:
                 self.use_request = {"use_item":use_item,"use_card":use_card,
                                     "use_id":f'{obs["session"]}:{obs["frame"]}:{"item" if use_item else "card"}'}
         request = self.use_request if obs["frame"] <= self.use_until else {}
+        # A held input is not evidence that a weapon actually fired. Release
+        # it for six game frames if the tear counter stalls, then re-aim.
+        # This also lets charge-and-release weapons discharge without changing
+        # game stats or spawning projectiles directly.
+        if (obs.get('armed') and not obs.get('paused') and obs.get('controls', True)
+                and not obs.get('dead') and 'tears' in obs and any(obs.get('applied_shoot', [0,0]))):
+            watch_key = (enemy['id'] if enemy else None, tuple(obs['applied_shoot']), obs['tears'])
+            if self.shot_watch is None or self.shot_watch[0] != watch_key:
+                self.shot_watch = (watch_key, obs['frame'])
+            timeout = max(60., 3*(obs['player'].get('max_fire_delay', 10)+1))
+            if obs['frame']-self.shot_watch[1] >= timeout:
+                self.release_until = obs['frame']+6
+                self.shot_watch = None
+        else:
+            self.shot_watch = None
+        releasing = obs['frame'] < self.release_until
+        if releasing:
+            shoot = [0., 0.]
         return {"move":best, "shoot":shoot, "use_item":use_item, "use_card":use_card,
                 "escape_dir":escape, "danger":danger,
                 "hurt":obs["frame"]<self.hurt_until, "mode":mode, "goal":goal,
                 "room_count":len(self.visits), "grid":grid, "target":enemy["id"] if enemy else None,
                 "target_kind": "poop" if clearing_poop else ("fire" if clearing_fire else "enemy"),
                 "target_entity":enemy,
+                "releasing_attack":releasing,
                 "repositioning":obs["frame"]<self.reposition_until, **request}
 
     @staticmethod
